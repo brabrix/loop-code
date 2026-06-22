@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Plus, Trash2, Loader2, Save, Code2, FileCode, Check } from 'lucide-react';
+import { Plus, Trash2, Loader2, Save, Code2, FileCode, Check, ClipboardPaste } from 'lucide-react';
 import { ConnectIcon } from './ui/connect.jsx';
 import { HoverIcon } from './ui/hover-icon.jsx';
 import CodeMirror from '@uiw/react-codemirror';
@@ -17,6 +17,8 @@ import { DragHandle } from './ui/drag-handle.jsx';
 import { EmptyState } from './ui/empty-state.jsx';
 import { useTheme } from '@/lib/theme.jsx';
 import { cn } from '@/lib/utils';
+import { parseCurl, splitUrlParams } from '@/lib/curl';
+import { toast } from '@/lib/toast';
 
 const METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS'];
 
@@ -93,20 +95,7 @@ function parseHttp(text) {
   }
   const body = lines.slice(i).join('\n').trim();
 
-  let url = rawUrl;
-  const params = [];
-  const qi = rawUrl.indexOf('?');
-  if (qi >= 0) {
-    url = rawUrl.slice(0, qi);
-    for (const pair of rawUrl.slice(qi + 1).split('&')) {
-      if (!pair) continue;
-      const eq = pair.indexOf('=');
-      const k = eq >= 0 ? pair.slice(0, eq) : pair;
-      const v = eq >= 0 ? pair.slice(eq + 1) : '';
-      try { params.push({ on: true, key: decodeURIComponent(k), val: decodeURIComponent(v) }); }
-      catch { params.push({ on: true, key: k, val: v }); }
-    }
-  }
+  const { url, params } = splitUrlParams(rawUrl);
   return {
     method: METHODS.includes(method) ? method : 'GET',
     url,
@@ -170,6 +159,11 @@ export function ApiPanel({ active }) {
   const [snippetOpen, setSnippetOpen] = useState(false);
   const [copied, setCopied] = useState(false);
   const snippetRef = useRef(null);
+
+  // Importar de cURL
+  const [importing, setImporting] = useState(false);
+  const [importDraft, setImportDraft] = useState('');
+  const [importError, setImportError] = useState('');
 
   // Layout redimensionável (persistido).
   const [sidebarWidth, setSidebarWidth] = useState(() => Number(localStorage.getItem('apiSidebarWidth')) || 200);
@@ -253,6 +247,34 @@ export function ApiPanel({ active }) {
     setBody(''); setRes(null); setErr(null); setCurrentName(null);
   };
 
+  // Interpreta um comando cURL e preenche os campos. Retorna false se não entendeu.
+  const applyCurl = useCallback((text) => {
+    const p = parseCurl(text);
+    if (!p) return false;
+    setMethod(p.method); setUrl(p.url); setParams(p.params); setHeaders(p.headers);
+    setBody(p.body); setTab('params'); setRes(null); setErr(null); setCurrentName(null);
+    toast.success('Pronto! Sua chamada foi montada ✨');
+    return true;
+  }, []);
+
+  const IMPORT_FAIL = 'Não consegui entender esse comando. Confira se você copiou um cURL completo.';
+
+  const openImport = () => { setImportError(''); setImportDraft(''); setImporting(true); };
+  const closeImport = () => { setImporting(false); setImportDraft(''); setImportError(''); };
+  const doImport = () => {
+    if (!importDraft.trim()) return;
+    if (applyCurl(importDraft)) closeImport();
+    else setImportError(IMPORT_FAIL);
+  };
+
+  // Colar um comando cURL direto no campo de URL → importa em vez de colar o texto cru.
+  const onUrlPaste = (e) => {
+    const t = e.clipboardData?.getData('text') ?? '';
+    if (!/^\s*curl\b/i.test(t)) return;
+    e.preventDefault();
+    if (!applyCurl(t)) { setImportDraft(t); setImportError(IMPORT_FAIL); setImporting(true); }
+  };
+
   const loadSaved = async (name) => {
     const r = await window.api.httpReadSaved(projectPath, name);
     if (!r.ok) { setErr(r.error); return; }
@@ -320,7 +342,12 @@ export function ApiPanel({ active }) {
               ))}
             </SelectContent>
           </Select>
-          <Input value={url} onChange={(e) => setUrl(e.target.value)} onKeyDown={onUrlKey} placeholder="https://api.exemplo.com/recurso" spellCheck={false} className="h-8 flex-1 font-mono text-xs" />
+          <Input value={url} onChange={(e) => setUrl(e.target.value)} onKeyDown={onUrlKey} onPaste={onUrlPaste} placeholder="https://api.exemplo.com/recurso" spellCheck={false} className="h-8 flex-1 font-mono text-xs" />
+
+          {/* Importar de cURL */}
+          <Button variant="secondary" size="sm" className="h-8 shrink-0" onClick={openImport} title="Importar de um comando cURL (copiado da documentação da API)">
+            <ClipboardPaste className="mr-1" />Importar
+          </Button>
 
           {/* Copiar como (dropdown) */}
           <div ref={snippetRef} className="relative shrink-0">
@@ -347,6 +374,30 @@ export function ApiPanel({ active }) {
             {loading ? <Loader2 className="mr-1 animate-spin" /> : <HoverIcon as={ConnectIcon} className="mr-1" />}Enviar
           </Button>
         </div>
+
+        {/* Faixa de importar cURL */}
+        {importing && (
+          <div className="flex shrink-0 flex-col gap-1 border-b bg-muted/40 px-2.5 py-2">
+            <div className="flex items-center gap-2">
+              <span className="shrink-0 text-xs text-muted-foreground">Colar cURL:</span>
+              <Input
+                autoFocus
+                value={importDraft}
+                onChange={(e) => { setImportDraft(e.target.value); setImportError(''); }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') doImport();
+                  else if (e.key === 'Escape') closeImport();
+                }}
+                placeholder="Cole aqui o comando que você copiou da documentação da API"
+                spellCheck={false}
+                className="h-7 flex-1 font-mono text-xs"
+              />
+              <Button size="sm" className="h-7" onClick={doImport} disabled={!importDraft.trim()}>Importar</Button>
+              <Button variant="ghost" size="sm" className="h-7" onClick={closeImport}>Cancelar</Button>
+            </div>
+            {importError && <span className="text-[11px] text-red-500">{importError}</span>}
+          </div>
+        )}
 
         {/* Barra de nome (aparece ao salvar uma request nova) */}
         {naming && (
