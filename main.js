@@ -1367,6 +1367,11 @@ ipcMain.handle('llm:remove', async () => {
   catch (e) { return { ok: false, error: (e && e.message) || String(e) }; }
 });
 
+ipcMain.handle('llm:warmup', async () => {
+  try { return await llmCore.warmup(llmUserDir()); }
+  catch (e) { return { ok: false, error: (e && e.message) || String(e) }; }
+});
+
 ipcMain.handle('llm:generate', async (evt, { task, input }) => {
   try { return { ok: true, text: await llmCore.generate({ userDataDir: llmUserDir(), task, input }) }; }
   catch (e) { return { ok: false, error: (e && e.message) || String(e) }; }

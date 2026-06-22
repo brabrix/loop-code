@@ -86,6 +86,7 @@ export function GitPanel({ active, visible }) {
   const [newBranch, setNewBranch] = useState('');
   const [llm, setLlm] = useState({ enabled: false, ready: false, commit: false });
   const [genBusy, setGenBusy] = useState(false);
+  const warmedRef = useRef(false); // já disparou o aquecimento do modelo nesta sessão do app?
 
   const refresh = useCallback(async (silent) => {
     if (!projectPath) { setStatus(null); return; }
@@ -105,11 +106,14 @@ export function GitPanel({ active, visible }) {
     (async () => {
       const [cfg, st] = await Promise.all([window.api.llmGetConfig(), window.api.llmStatus()]);
       if (cancelled) return;
-      setLlm({
-        enabled: !!cfg?.enabled,
-        commit: !!cfg?.features?.commit,
-        ready: !!st?.installed,
-      });
+      const on = !!cfg?.enabled && !!cfg?.features?.commit && !!st?.installed;
+      setLlm({ enabled: !!cfg?.enabled, commit: !!cfg?.features?.commit, ready: !!st?.installed });
+      // Aquece o modelo em segundo plano (uma vez) pra o 1º clique já sair rápido —
+      // sem isso, a primeira geração paga o custo de carregar o modelo na RAM.
+      if (on && !warmedRef.current) {
+        warmedRef.current = true;
+        window.api.llmWarmup?.().catch(() => { warmedRef.current = false; });
+      }
     })();
     return () => { cancelled = true; };
   }, [visible]);

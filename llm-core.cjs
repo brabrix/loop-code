@@ -9,7 +9,7 @@ const MODEL_ID = 'qwen2.5-0.5b-instruct-q4_k_m';
 const MODEL_FILE = 'hf_bartowski_Qwen2.5-0.5B-Instruct-Q4_K_M.gguf';
 const MODEL_URI = 'hf:bartowski/Qwen2.5-0.5B-Instruct-GGUF/Qwen2.5-0.5B-Instruct-Q4_K_M.gguf';
 
-const GEN = { contextSize: 2048, temperature: 0.2, maxTokens: 48, timeoutMs: 20000 };
+const GEN = { contextSize: 2048, temperature: 0.2, maxTokens: 48, timeoutMs: 30000 };
 
 // Prompt de sistema fixo por tarefa. Travado: saída curta, sem explicação.
 const SYSTEM = {
@@ -97,6 +97,14 @@ async function ensureModel(userDataDir) {
   return _model;
 }
 
+// Pré-carrega o modelo na RAM em segundo plano (sem gerar), pra a 1ª geração
+// já sair quente e rápida. Idempotente: ensureModel cacheia o modelo carregado.
+// Resolve em { ok } e nunca lança — aquecimento é "melhor esforço".
+async function warmup(userDataDir) {
+  try { await ensureModel(userDataDir); return { ok: true }; }
+  catch (e) { return { ok: false, error: (e && e.message) || String(e) }; }
+}
+
 async function generate({ userDataDir, task, input }) {
   const sys = SYSTEM[task];
   if (!sys) throw new Error('Tarefa de IA desconhecida: ' + task);
@@ -120,4 +128,4 @@ async function generate({ userDataDir, task, input }) {
   }
 }
 
-module.exports = { MODEL_ID, MODEL_FILE, MODEL_URI, modelPath, status, download, remove, generate };
+module.exports = { MODEL_ID, MODEL_FILE, MODEL_URI, modelPath, status, download, remove, warmup, generate };

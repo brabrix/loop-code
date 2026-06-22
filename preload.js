@@ -98,6 +98,7 @@ contextBridge.exposeInMainWorld('api', {
   llmStatus: () => ipcRenderer.invoke('llm:status'),
   llmDownload: () => ipcRenderer.invoke('llm:download'),
   llmRemove: () => ipcRenderer.invoke('llm:remove'),
+  llmWarmup: () => ipcRenderer.invoke('llm:warmup'),
   llmGenerate: (task, input) => ipcRenderer.invoke('llm:generate', { task, input }),
   onLlmDownloadProgress: (cb) => {
     const handler = (_e, data) => cb(data);
