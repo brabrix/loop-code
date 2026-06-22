@@ -92,6 +92,19 @@ contextBridge.exposeInMainWorld('api', {
   mcpSaveServer: (projectPath, name, config) => ipcRenderer.invoke('mcp:saveServer', { projectPath, name, config }),
   mcpDeleteServer: (projectPath, name) => ipcRenderer.invoke('mcp:deleteServer', { projectPath, name }),
 
+  // IA local (llm-core): config, modelo e geração de texto curto
+  llmGetConfig: () => ipcRenderer.invoke('llm:getConfig'),
+  llmSetConfig: (patch) => ipcRenderer.invoke('llm:setConfig', { patch }),
+  llmStatus: () => ipcRenderer.invoke('llm:status'),
+  llmDownload: () => ipcRenderer.invoke('llm:download'),
+  llmRemove: () => ipcRenderer.invoke('llm:remove'),
+  llmGenerate: (task, input) => ipcRenderer.invoke('llm:generate', { task, input }),
+  onLlmDownloadProgress: (cb) => {
+    const handler = (_e, data) => cb(data);
+    ipcRenderer.on('llm:downloadProgress', handler);
+    return () => ipcRenderer.removeListener('llm:downloadProgress', handler);
+  },
+
   // Biblioteca de prompts salvos (por projeto, em .carcara/prompts.json)
   promptsList: (projectPath) => ipcRenderer.invoke('prompts:list', { projectPath }),
   promptsSave: (projectPath, items) => ipcRenderer.invoke('prompts:save', { projectPath, items }),
