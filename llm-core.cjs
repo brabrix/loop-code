@@ -9,14 +9,29 @@ const MODEL_ID = 'qwen2.5-0.5b-instruct-q4_k_m';
 const MODEL_FILE = 'hf_bartowski_Qwen2.5-0.5B-Instruct-Q4_K_M.gguf';
 const MODEL_URI = 'hf:bartowski/Qwen2.5-0.5B-Instruct-GGUF/Qwen2.5-0.5B-Instruct-Q4_K_M.gguf';
 
-const GEN = { contextSize: 2048, temperature: 0.2, maxTokens: 48, timeoutMs: 30000 };
+const GEN = { contextSize: 2048, temperature: 0.2, maxTokens: 80, timeoutMs: 30000 };
 
-// Prompt de sistema fixo por tarefa. Travado: saída curta, sem explicação.
+// Prompt de sistema fixo por tarefa. Travado: saída de uma linha, sem explicação.
 const SYSTEM = {
   commit:
-    'Você gera mensagens de commit curtas em português, no estilo Conventional Commits ' +
-    '(formato "tipo: descrição", ex.: "fix: corrige validação do login"). ' +
-    'Máximo ~8 palavras. Responda APENAS a mensagem, sem aspas e sem explicação.',
+    'Você escreve mensagens de commit em PORTUGUÊS DO BRASIL, no estilo Conventional Commits. ' +
+    'REGRA ABSOLUTA: a mensagem é SEMPRE em português, mesmo quando o código e o diff estão em inglês. ' +
+    'NUNCA escreva a mensagem em inglês — traduza a intenção para o português. ' +
+    'Formato: "tipo: descrição" (tipos válidos: feat, fix, refactor, docs, chore, style, test, perf). ' +
+    'A descrição é uma frase clara de 6 a 14 palavras dizendo o que mudou. ' +
+    'Responda APENAS a mensagem, em uma única linha, sem aspas e sem explicação.\n\n' +
+    'Exemplos (repare: o diff está em inglês, mas a mensagem está em português):\n' +
+    'Diff: +function validateEmail(email) { return /.+@.+/.test(email); }\n' +
+    'Mensagem: feat: adiciona validação de email no formulário de cadastro\n' +
+    'Diff: -const timeout = 30; +const timeout = 60;\n' +
+    'Mensagem: fix: aumenta o tempo limite de conexão para 60 segundos\n' +
+    'Diff: +The author has deep expertise in distributed systems and migrations\n' +
+    'Mensagem: docs: descreve a experiência do autor em sistemas distribuídos',
+};
+
+// Moldura por tarefa aplicada à mensagem do usuário — reforça o idioma pra modelos pequenos.
+const USER_FRAME = {
+  commit: (input) => 'Escreva a mensagem de commit em português do Brasil para este diff:\n\n' + input,
 };
 
 let _libPromise; // cache do import() ESM
@@ -116,7 +131,9 @@ async function generate({ userDataDir, task, input }) {
   const timer = setTimeout(() => ac.abort(), GEN.timeoutMs);
   try {
     const session = new LlamaChatSession({ contextSequence: context.getSequence(), systemPrompt: sys });
-    const out = await session.prompt(String(input || ''), {
+    const frame = USER_FRAME[task];
+    const userMsg = frame ? frame(String(input || '')) : String(input || '');
+    const out = await session.prompt(userMsg, {
       temperature: GEN.temperature,
       maxTokens: GEN.maxTokens,
       signal: ac.signal,
