@@ -44,7 +44,7 @@ async function download(userDataDir, onProgress) {
     modelUri: MODEL_URI,
     dirPath: modelsDir(userDataDir),
     onProgress: ({ totalSize, downloadedSize }) => {
-      if (typeof onProgress === 'function') onProgress({ done: downloadedSize || 0, total: totalSize || 0 });
+      if (typeof onProgress === 'function') onProgress({ done: downloadedSize ?? 0, total: totalSize ?? 0 });
     },
   });
   const outPath = await downloader.download();
@@ -55,6 +55,8 @@ async function remove(userDataDir) {
   // Descarrega o que estiver quente antes de apagar o arquivo.
   try { if (_model) await _model.dispose(); } catch {}
   _model = null; _modelPathLoaded = null;
+  try { if (_llama) await _llama.dispose(); } catch {}
+  _llama = null;
   try { fs.unlinkSync(modelPath(userDataDir)); } catch {}
 }
 
