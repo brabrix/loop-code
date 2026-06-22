@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
-import { Sun, Moon, X, Check, Paintbrush, Bot, Wrench, Monitor, Terminal, ZoomIn, ZoomOut, RotateCcw } from 'lucide-react';
+import { Sun, Moon, X, Check, Paintbrush, Bot, Wrench, Monitor, Terminal, ZoomIn, ZoomOut, RotateCcw, Bell } from 'lucide-react';
 import { ClaudeCodeIcon, CodexIcon, OpenCodeIcon, AntigravityIcon } from '@/lib/cliIcons.jsx';
 import { useTheme } from '@/lib/theme.jsx';
 import { Input } from './ui/input.jsx';
+import { Switch } from './ui/switch.jsx';
 import { cn } from '@/lib/utils';
 
 // CLIs de IA suportados. O 'cmd' é o que é digitado no terminal ao abrir a sessão.
@@ -37,12 +38,18 @@ export function SettingsModal({ open, onClose }) {
   const [projects, setProjects] = useState([]);
   const [sel, setSel] = useState({}); // path -> { cli, custom }
   const [zoom, setZoom] = useState(1); // fator de zoom da janela (1 = 100%)
+  const [notify, setNotify] = useState(true); // notificar quando o Claude termina
 
   // Lê o zoom atual ao abrir (mesma fonte do atalho Ctrl +/-: webFrame + localStorage).
   useEffect(() => {
     if (!open) return;
     setZoom(Number(localStorage.getItem('appZoom')) || window.api.getZoom() || 1);
+    window.api.getNotify().then((r) => setNotify(r?.enabled !== false)).catch(() => {});
   }, [open]);
+
+  const toggleNotify = () => {
+    setNotify((v) => { const next = !v; window.api.setNotify(next); return next; });
+  };
 
   const applyZoom = (dir) => {
     const f = window.api.zoom(dir);
@@ -92,13 +99,14 @@ export function SettingsModal({ open, onClose }) {
         <div className="px-2 py-2 text-base font-semibold">Configurações</div>
         <TabButton active={tab === 'ai'} onClick={() => setTab('ai')} icon={<Bot />}>IA por projeto</TabButton>
         <TabButton active={tab === 'appearance'} onClick={() => setTab('appearance')} icon={<Paintbrush />}>Aparência</TabButton>
+        <TabButton active={tab === 'notify'} onClick={() => setTab('notify')} icon={<Bell />}>Notificações</TabButton>
       </div>
 
       {/* Conteúdo */}
       <div className="flex min-w-0 flex-1 flex-col">
         <div className="flex h-14 shrink-0 items-center border-b px-6">
           <h1 className="text-[15px] font-semibold">
-            {tab === 'ai' ? 'IA por projeto' : 'Aparência'}
+            {tab === 'ai' ? 'IA por projeto' : tab === 'notify' ? 'Notificações' : 'Aparência'}
           </h1>
           <div className="flex-1" />
           <button type="button" onClick={onClose} title="Fechar (Esc)"
@@ -230,6 +238,25 @@ export function SettingsModal({ open, onClose }) {
                   className={cn('flex items-center justify-center gap-2 rounded-md border p-3 text-sm transition-colors hover:bg-muted', terminalAppearance === 'dark' && 'border-primary ring-1 ring-primary')}>
                   <Moon className="h-4 w-4" /> Escuro
                 </button>
+              </div>
+            </div>
+          )}
+
+          {tab === 'notify' && (
+            <div className="mx-auto max-w-3xl">
+              <div className="flex items-start justify-between gap-4 rounded-lg border p-4">
+                <div className="min-w-0">
+                  <div className="text-[13px] font-medium">Avisar quando o Claude terminar</div>
+                  <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+                    Mostra uma notificação do sistema quando o Claude Code conclui uma tarefa
+                    num projeto que você <span className="font-medium text-foreground">não está olhando</span>.
+                    Útil pra deixar rodando num projeto e ir mexer em outro. Vale só pra projetos
+                    em Claude Code — Codex/OpenCode/Antigravity/personalizado não disparam aviso.
+                  </p>
+                </div>
+                <Switch checked={notify} onCheckedChange={toggleNotify}
+                  title={notify ? 'Notificações ligadas' : 'Notificações desligadas'}
+                  className="mt-0.5" />
               </div>
             </div>
           )}

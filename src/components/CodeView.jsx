@@ -6,7 +6,7 @@ import { createContext, useCallback, useContext, useEffect, useRef, useState } f
 import {
   Save, Copy, X, Search, ChevronRight, ChevronDown,
   Scissors, ClipboardPaste, Link2, Pencil, Trash2, ExternalLink,
-  ZoomIn, ZoomOut, Maximize2,
+  ZoomIn, ZoomOut, Maximize2, Eye, EyeOff, Plus, KeyRound,
 } from 'lucide-react';
 import { fileIconUrl, folderIconUrl } from '@/lib/fileIcons';
 import { TransformWrapper, TransformComponent } from 'react-zoom-pan-pinch';
@@ -121,7 +121,7 @@ function parentDir(p) {
   return i > 0 ? p.slice(0, i) : p;
 }
 
-export function CodeView({ active }) {
+export function CodeView({ active, openRequest }) {
   const { theme } = useTheme();
   // Abas de arquivos abertos. Cada aba carrega o próprio estado (conteúdo, imagem,
   // notice de erro e dirty) pra que alternar entre abas preserve edições não salvas.
@@ -131,6 +131,14 @@ export function CodeView({ active }) {
   activePathRef.current = activePath;
   const activeTab = tabs.find((t) => t.path === activePath) || null;
   const saveRef = useRef(() => {});
+  // .env abertos como texto cru (CodeMirror) em vez do editor mascarado. Por path.
+  const [rawEnv, setRawEnv] = useState(() => new Set());
+  const envRaw = activeTab && rawEnv.has(activeTab.path);
+  const toggleEnvRaw = () => setRawEnv((s) => {
+    const n = new Set(s);
+    n.has(activeTab.path) ? n.delete(activeTab.path) : n.add(activeTab.path);
+    return n;
+  });
 
   // Menu de contexto da árvore
   const [menu, setMenu] = useState(null);     // { x, y, item }
@@ -356,6 +364,17 @@ export function CodeView({ active }) {
     setActivePath(item.path);
   };
 
+  // Pedido externo de abrir arquivo (paleta de comandos). Usa ref pra chamar o
+  // openFile atual sem re-disparar o efeito, e o `seq` evita reabrir à toa.
+  const openFileRef = useRef(openFile);
+  openFileRef.current = openFile;
+  const lastOpenSeq = useRef(0);
+  useEffect(() => {
+    if (!openRequest || openRequest.seq === lastOpenSeq.current) return;
+    lastOpenSeq.current = openRequest.seq;
+    openFileRef.current({ path: openRequest.path, name: openRequest.name });
+  }, [openRequest]);
+
   const save = useCallback(async () => {
     const t = tabs.find((x) => x.path === activePath);
     if (!t || t.notice) return;
@@ -555,6 +574,12 @@ export function CodeView({ active }) {
                   );
                 })}
               </div>
+              {activeTab && !activeTab.notice && !activeTab.image && isEnvFile(activeTab.name) && (
+                <Button variant="ghost" size="sm" className="h-7 shrink-0 gap-1.5 text-muted-foreground" onClick={toggleEnvRaw}
+                  title={envRaw ? 'Voltar ao editor seguro (mascarado)' : 'Ver como texto puro'}>
+                  {envRaw ? <><KeyRound className="size-3.5" />Modo seguro</> : <><Eye className="size-3.5" />Ver como texto</>}
+                </Button>
+              )}
               {activeTab && !activeTab.notice && !activeTab.image && (
                 <Button variant="secondary" size="sm" className="mr-2 h-7 shrink-0" onClick={save} disabled={!activeTab.dirty} title="Salvar (Ctrl+S)">
                   <Save className="mr-1" />Salvar
@@ -570,6 +595,11 @@ export function CodeView({ active }) {
             <ImageViewer src={activeTab.image} name={activeTab.name} />
           ) : activeTab?.notice ? (
             <div className="flex h-full items-center justify-center text-muted-foreground">{activeTab.notice}</div>
+          ) : activeTab && isEnvFile(activeTab.name) && !envRaw ? (
+            <EnvEditor
+              value={activeTab.content}
+              onChange={(v) => setTabs((cur) => cur.map((x) => (x.path === activePathRef.current ? { ...x, content: v, dirty: true } : x)))}
+            />
           ) : activeTab ? (
             <CodeMirror
               key={activeTab.path}
@@ -602,6 +632,134 @@ export function CodeView({ active }) {
         onConfirm={() => performDelete(delItems)}
         onCancel={() => setDelItems(null)}
       />
+    </div>
+  );
+}
+
+// Arquivos de ambiente (.env, .env.local, .env.production, foo.env): abrem no editor
+// mascarado em vez do CodeMirror, pra não vazar segredo em screenshot/print.
+function isEnvFile(name) {
+  const n = (name || '').toLowerCase();
+  return n === '.env' || n.startsWith('.env.') || n.endsWith('.env');
+}
+
+// Cada linha vira uma chave/valor editável OU uma linha "crua" (comentário, em branco)
+// preservada como está. Normaliza quebras pra \n; preserva o espaçamento ao redor do "=".
+function parseEnv(text) {
+  return (text || '').split(/\r?\n/).map((line) => {
+    const m = line.match(/^(\s*)([A-Za-z_][A-Za-z0-9_.]*)(\s*=\s*)(.*)$/);
+    if (m && !line.trimStart().startsWith('#')) {
+      return { type: 'kv', indent: m[1], key: m[2], sep: m[3], value: m[4] };
+    }
+    return { type: 'raw', text: line };
+  });
+}
+function serializeEnv(rows) {
+  return rows.map((r) => (r.type === 'kv' ? r.indent + r.key + r.sep + r.value : r.text)).join('\n');
+}
+
+// Editor de .env com valores mascarados por padrão (•••). Revela por linha (olho) ou
+// tudo de uma vez; edita chave/valor, adiciona e remove variáveis. Escreve de volta no
+// `content` da aba — o botão Salvar (Ctrl+S) do CodeView segue funcionando igual.
+function EnvEditor({ value, onChange }) {
+  const rows = parseEnv(value);
+  const [revealed, setRevealed] = useState(() => new Set());
+  const [revealAll, setRevealAll] = useState(false);
+
+  const commit = (next) => onChange(serializeEnv(next));
+  const setVal = (idx, v) => commit(rows.map((r, i) => (i === idx ? { ...r, value: v } : r)));
+  const setKey = (idx, k) => commit(rows.map((r, i) => (i === idx ? { ...r, key: k } : r)));
+  const removeRow = (idx) => commit(rows.filter((_, i) => i !== idx));
+  const addRow = () => {
+    const next = [...rows];
+    if (next.length && next[next.length - 1].text !== '') next.push({ type: 'raw', text: '' });
+    next.push({ type: 'kv', indent: '', key: 'NOVA_VARIAVEL', sep: '=', value: '' });
+    commit(next);
+  };
+  const toggle = (idx) =>
+    setRevealed((cur) => {
+      const n = new Set(cur);
+      n.has(idx) ? n.delete(idx) : n.add(idx);
+      return n;
+    });
+
+  const kvCount = rows.filter((r) => r.type === 'kv').length;
+
+  return (
+    <div className="absolute inset-0 flex flex-col bg-background">
+      <div className="flex h-9 shrink-0 items-center gap-2 border-b bg-card px-3 text-xs text-muted-foreground">
+        <KeyRound className="size-3.5" />
+        <span>Editor seguro de ambiente — valores mascarados</span>
+        <div className="flex-1" />
+        <button
+          type="button"
+          onClick={() => setRevealAll((v) => !v)}
+          className="flex h-7 items-center gap-1.5 rounded px-2 transition-colors hover:bg-muted [&_svg]:size-3.5"
+        >
+          {revealAll ? <EyeOff /> : <Eye />}
+          {revealAll ? 'Ocultar tudo' : 'Revelar tudo'}
+        </button>
+      </div>
+
+      <div className="min-h-0 flex-1 overflow-y-auto p-3">
+        {kvCount === 0 ? (
+          <p className="px-1 py-6 text-center text-[13px] text-muted-foreground">
+            Nenhuma variável. Clique em “Adicionar variável”.
+          </p>
+        ) : (
+          <div className="flex flex-col gap-1.5">
+            {rows.map((r, i) =>
+              // Comentários e linhas em branco ficam OCULTOS no modo mascarado (mas são
+              // preservados no arquivo ao salvar). Pra vê-los, use "Ver como texto".
+              r.type !== 'kv' ? null : (
+                <div key={i} className="group flex items-center gap-2">
+                  <input
+                    value={r.key}
+                    onChange={(e) => setKey(i, e.target.value)}
+                    spellCheck={false}
+                    className="w-[34%] shrink-0 rounded-md border bg-card px-2.5 py-1.5 font-mono text-[12.5px] text-foreground outline-none focus:border-primary"
+                  />
+                  <span className="text-muted-foreground">=</span>
+                  <div className="relative flex-1">
+                    <input
+                      value={r.value}
+                      onChange={(e) => setVal(i, e.target.value)}
+                      type={revealAll || revealed.has(i) ? 'text' : 'password'}
+                      spellCheck={false}
+                      autoComplete="off"
+                      className="w-full rounded-md border bg-card py-1.5 pl-2.5 pr-9 font-mono text-[12.5px] text-foreground outline-none focus:border-primary"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => toggle(i)}
+                      title={revealAll || revealed.has(i) ? 'Ocultar' : 'Revelar'}
+                      className="absolute right-1.5 top-1/2 flex size-6 -translate-y-1/2 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-muted hover:text-foreground [&_svg]:size-3.5"
+                    >
+                      {revealAll || revealed.has(i) ? <EyeOff /> : <Eye />}
+                    </button>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => removeRow(i)}
+                    title="Remover variável"
+                    className="flex size-7 shrink-0 items-center justify-center rounded text-muted-foreground opacity-0 transition-opacity hover:bg-destructive/10 hover:text-destructive group-hover:opacity-100 [&_svg]:size-3.5"
+                  >
+                    <Trash2 />
+                  </button>
+                </div>
+              )
+            )}
+          </div>
+        )}
+
+        <button
+          type="button"
+          onClick={addRow}
+          className="mt-3 flex h-8 items-center gap-1.5 rounded-md border border-dashed px-2.5 text-[13px] text-muted-foreground transition-colors hover:border-primary hover:text-foreground [&_svg]:size-3.5"
+        >
+          <Plus />Adicionar variável
+        </button>
+      </div>
     </div>
   );
 }

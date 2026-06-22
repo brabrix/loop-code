@@ -1,15 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
 import { Plus, Trash2 } from 'lucide-react';
 import { SettingsIcon } from './ui/settings.jsx';
+import { SearchIcon } from './ui/search.jsx';
+import { colorFor, initials } from '@/lib/projectColor';
 import { cn } from '@/lib/utils';
 
-function colorFor(name) {
-  let h = 0;
-  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) % 360;
-  return `hsl(${h} 55% 45%)`;
-}
-
-export function Rail({ projects, active, activity = {}, onOpen, onAdd, onRemove, onReorder, onOpenSettings, width = 64 }) {
+export function Rail({ projects, active, activity = {}, onOpen, onAdd, onRemove, onReorder, onOpenSettings, onSearch, width = 64 }) {
   const [menu, setMenu] = useState(null);         // { x, y, project }
   const [dragPath, setDragPath] = useState(null); // path do item sendo arrastado
   const [overPath, setOverPath] = useState(null); // path do item sob o cursor
@@ -44,6 +40,18 @@ export function Rail({ projects, active, activity = {}, onOpen, onAdd, onRemove,
 
   return (
     <nav style={{ width }} className="no-scrollbar flex shrink-0 flex-col overflow-y-auto border-r bg-card py-3">
+      {/* Busca no topo: a "bolinha" que abre a paleta de comandos (Ctrl+K) — projetos,
+          arquivos e ações. Fica acima dos projetos pra a pessoa saber que existe. */}
+      <div className="flex shrink-0 flex-col items-center px-2">
+        <button
+          onClick={onSearch}
+          title="Buscar projetos, arquivos e ações (Ctrl+K)"
+          className="flex h-[42px] w-[42px] items-center justify-center rounded-full border bg-secondary text-muted-foreground transition-colors hover:bg-primary hover:text-primary-foreground [&_svg]:size-[18px]"
+        >
+          <SearchIcon size={18} />
+        </button>
+        <div className="my-2.5 h-px w-7 rounded-full bg-border" />
+      </div>
       <div
         className="flex flex-1 flex-wrap content-start justify-center gap-2.5 px-2"
         onDragOver={(e) => e.preventDefault()}
@@ -77,22 +85,33 @@ export function Rail({ projects, active, activity = {}, onOpen, onAdd, onRemove,
               {p.icon ? (
                 <img src={p.icon} alt={p.name} draggable={false} className="h-full w-full object-contain p-1" />
               ) : (
-                <span>{p.name.slice(0, 2).toUpperCase()}</span>
+                <span>{initials(p.name)}</span>
               )}
             </span>
             {p.running && (
               <span className="absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full border-2 border-card bg-green-500" />
             )}
-            {/* Atividade do Claude (canto superior, separado do verde de "preview rodando"):
-                âmbar pulsando = trabalhando; âmbar fixo = terminou e você ainda não viu. */}
+            {/* Atividade do Claude (canto superior, separado do verde de "preview rodando"),
+                agregada por projeto: âmbar pulsando = trabalhando; âmbar com halo = pediu
+                uma confirmação; âmbar fixo = terminou e você ainda não viu. O badge some ao
+                focar o projeto; o detalhe por sessão aparece na aba (ver ChatPanel). */}
             {activity[p.path] && (
-              <span
-                title={activity[p.path] === 'working' ? 'Claude trabalhando…' : 'Claude terminou'}
-                className={cn(
-                  'absolute -right-0.5 -top-0.5 h-2.5 w-2.5 rounded-full border-2 border-card bg-amber-500',
-                  activity[p.path] === 'working' && 'animate-pulse'
+              <span className="absolute -right-0.5 -top-0.5 flex h-2.5 w-2.5">
+                {activity[p.path] === 'asking' && (
+                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-amber-500 opacity-75" />
                 )}
-              />
+                <span
+                  title={
+                    activity[p.path] === 'working' ? 'Claude trabalhando…'
+                    : activity[p.path] === 'asking' ? 'Claude pediu uma confirmação'
+                    : 'Claude terminou'
+                  }
+                  className={cn(
+                    'relative inline-flex h-2.5 w-2.5 rounded-full border-2 border-card bg-amber-500',
+                    activity[p.path] === 'working' && 'animate-pulse'
+                  )}
+                />
+              </span>
             )}
           </button>
         ))}

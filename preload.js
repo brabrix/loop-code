@@ -92,6 +92,17 @@ contextBridge.exposeInMainWorld('api', {
   mcpSaveServer: (projectPath, name, config) => ipcRenderer.invoke('mcp:saveServer', { projectPath, name, config }),
   mcpDeleteServer: (projectPath, name) => ipcRenderer.invoke('mcp:deleteServer', { projectPath, name }),
 
+  // Biblioteca de prompts salvos (por projeto, em .carcara/prompts.json)
+  promptsList: (projectPath) => ipcRenderer.invoke('prompts:list', { projectPath }),
+  promptsSave: (projectPath, items) => ipcRenderer.invoke('prompts:save', { projectPath, items }),
+
+  // Checkpoints (voltar no tempo) — shadow git separado do repo do usuário
+  checkpointList: (projectPath) => ipcRenderer.invoke('checkpoint:list', { projectPath }),
+  checkpointCreate: (projectPath, label) => ipcRenderer.invoke('checkpoint:create', { projectPath, label }),
+  checkpointRestore: (projectPath, hash) => ipcRenderer.invoke('checkpoint:restore', { projectPath, hash }),
+  checkpointGetEnabled: () => ipcRenderer.invoke('checkpoint:getEnabled'),
+  checkpointSetEnabled: (enabled) => ipcRenderer.invoke('checkpoint:setEnabled', { enabled }),
+
   // Preview
   startPreview: (projectPath) => ipcRenderer.invoke('preview:start', { projectPath }),
   stopPreview: (projectPath) => ipcRenderer.invoke('preview:stop', { projectPath }),

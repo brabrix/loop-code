@@ -12,6 +12,7 @@ import { PenToolIcon } from './ui/pen-tool.jsx';
 import { ArrowLeftIcon } from './ui/arrow-left.jsx';
 import { ArrowRightIcon } from './ui/arrow-right.jsx';
 import { RotateCWIcon } from './ui/rotate-cw.jsx';
+import { ClockIcon } from './ui/clock.jsx';
 import { TerminalIcon } from './ui/terminal.jsx';
 import { HoverIcon } from './ui/hover-icon.jsx';
 import { Tabs, TabsList, TabsTrigger } from './ui/tabs.jsx';
@@ -49,6 +50,7 @@ const ApiPanel = lazy(() => import('./ApiPanel.jsx').then((m) => ({ default: m.A
 const ShellView = lazy(() => import('./ShellView.jsx').then((m) => ({ default: m.ShellView })));
 const MCPPanel = lazy(() => import('./MCPPanel.jsx').then((m) => ({ default: m.MCPPanel })));
 const TldrawPanel = lazy(() => import('./TldrawPanel.jsx').then((m) => ({ default: m.TldrawPanel })));
+const CheckpointsPanel = lazy(() => import('./CheckpointsPanel.jsx').then((m) => ({ default: m.CheckpointsPanel })));
 
 // Fallback enquanto o chunk do painel carrega (costuma ser instantâneo no disco).
 function PanelFallback() {
@@ -76,6 +78,7 @@ function MoreTools({ view, onPick }) {
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
   const TOOLS = [
+    { value: 'history', label: 'Histórico', Icon: ClockIcon },
     { value: 'api', label: 'API', Icon: ZapIcon },
     { value: 'mcp', label: 'MCP', Icon: PlugZapIcon },
     { value: 'board', label: 'Quadro', Icon: PenToolIcon },
@@ -94,7 +97,7 @@ function MoreTools({ view, onPick }) {
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
-        title="Mais ferramentas (API, MCP, Quadro)"
+        title="Mais ferramentas (Histórico, API, MCP, Quadro)"
         className={cn(
           'flex h-7 items-center gap-0.5 rounded-md px-1.5 transition-colors [&_svg]:size-[15px]',
           active ? 'text-primary' : 'text-muted-foreground hover:bg-muted hover:text-foreground'
@@ -159,6 +162,8 @@ function partitionFor(projectPath) {
 
 export function PreviewPanel({ active, onProjectsChanged, controlsRef, onModeChange }) {
   const [view, setView] = useState('preview');
+  const [openRequest, setOpenRequest] = useState(null); // { path, name, seq } — abrir arquivo na aba Código (paleta)
+  const openSeqRef = useRef(0);
   const [mode, setMode] = useState('empty'); // empty | log | web
   const [url, setUrl] = useState('');
   const [termOpen, setTermOpen] = useState(false);
@@ -538,7 +543,16 @@ export function PreviewPanel({ active, onProjectsChanged, controlsRef, onModeCha
   // Expõe parar/reiniciar pro cabeçalho (App.jsx), que mora na outra coluna. O ref
   // é reatribuído a cada render pra sempre apontar pros closures atuais; o `mode`
   // é reportado pra o cabeçalho saber habilitar/desabilitar os botões.
-  if (controlsRef) controlsRef.current = { stop, restart };
+  // Abre um arquivo na aba "Código" (vindo da paleta de comandos). O `seq` força o
+  // CodeView a reagir mesmo quando o mesmo arquivo é pedido duas vezes seguidas.
+  const openFile = useCallback((file) => {
+    if (!file?.path) return;
+    openSeqRef.current += 1;
+    setOpenRequest({ path: file.path, name: file.name, seq: openSeqRef.current });
+    setView('code');
+  }, []);
+
+  if (controlsRef) controlsRef.current = { stop, restart, setView, openFile };
   useEffect(() => { onModeChange?.(mode); }, [mode, onModeChange]);
 
   // Arrasta a borda superior do terminal pra redimensionar (estilo VS Code).
@@ -587,6 +601,7 @@ export function PreviewPanel({ active, onProjectsChanged, controlsRef, onModeCha
   const inApi = view === 'api';
   const inMcp = view === 'mcp';
   const inBoard = view === 'board';
+  const inHistory = view === 'history';
 
   return (
     <>
@@ -699,9 +714,10 @@ export function PreviewPanel({ active, onProjectsChanged, controlsRef, onModeCha
               </div>
             )
           )}
-          {inCode && <LazyPanel label="Código"><CodeView active={active} /></LazyPanel>}
+          {inCode && <LazyPanel label="Código"><CodeView active={active} openRequest={openRequest} /></LazyPanel>}
+          {inHistory && <LazyPanel label="Histórico"><CheckpointsPanel active={active} visible={inHistory} /></LazyPanel>}
           {inGit && <LazyPanel label="Git"><GitPanel active={active} visible={inGit} /></LazyPanel>}
-          {inApi && <LazyPanel label="API"><ApiPanel active={active} /></LazyPanel>}
+          {inApi && <LazyPanel label="API"><ApiPanel key={active?.path || 'none'} active={active} /></LazyPanel>}
           {inMcp && <LazyPanel label="MCP"><MCPPanel active={active} /></LazyPanel>}
           {inBoard && <LazyPanel label="Quadro"><TldrawPanel active={active} /></LazyPanel>}
         </div>

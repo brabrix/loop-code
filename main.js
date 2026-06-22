@@ -719,8 +719,26 @@ function notifyEnabled() {
   return loadConfig().notify !== false; // padrão: ligado
 }
 
-function emitActivity(entry, state) {
-  safeSend('activity:state', { projectPath: entry.projectPath, sessionId: entry.sessionId, state });
+function emitActivity(entry, state, extra) {
+  safeSend('activity:state', { projectPath: entry.projectPath, sessionId: entry.sessionId, state, ...extra });
+}
+
+// Tira os códigos ANSI (cores, posicionamento de cursor) pra sobrar só o texto visível.
+function stripAnsi(s) {
+  return s.replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, '').replace(/\x1b[=>NOPF]/g, '');
+}
+
+// Distingue "o Claude PEDIU algo (pergunta/permissão) e está esperando você" de "só
+// terminou o turno". Lê o rodapé do último frame redesenhado pela TUI (já sem ANSI) e
+// procura a assinatura dos prompts de permissão/seleção do Claude Code: a pergunta
+// ("Do you want to…/Would you like to…") ou o menu de opções (❯ na 1ª + 2ª numerada).
+// Olha só os últimos ~1200 chars visíveis pra pegar o estado ATUAL da tela, não um
+// prompt já respondido que ficou no histórico.
+function looksLikeAsking(entry) {
+  const tail = stripAnsi(entry.buffer.slice(-6000)).slice(-1200);
+  if (/Do you want to|Would you like to/i.test(tail)) return true;
+  if (/❯\s*1\.\s/.test(tail) && /\b2\.\s/.test(tail)) return true;
+  return false;
 }
 
 // Reinicia o debounce de ociosidade e marca a sessão como "trabalhando".
@@ -736,11 +754,13 @@ function activityIdle(entry) {
   if (!entry.working) return;
   entry.working = false;
   entry.armed = false;
-  emitActivity(entry, 'done');
-  maybeNotifyDone(entry);
+  const asking = looksLikeAsking(entry); // pediu confirmação vs. terminou de fato
+  emitActivity(entry, 'done', { asking });
+  maybeNotifyDone(entry, asking);
+  scheduleAutoCheckpoint(entry.projectPath); // snapshot do resultado do turno
 }
 
-function maybeNotifyDone(entry) {
+function maybeNotifyDone(entry, asking) {
   if (!notifyEnabled()) return;
   const focused = mainWindow && !mainWindow.isDestroyed() && mainWindow.isFocused();
   if (focused && activeProjectPath === entry.projectPath) return; // você já está olhando
@@ -749,7 +769,9 @@ function maybeNotifyDone(entry) {
   lastNotifyAt.set(entry.projectPath, now);
   try {
     if (Notification && !Notification.isSupported()) return;
-    const n = new Notification({ title: 'Carcará Code', body: `Claude terminou em ${path.basename(entry.projectPath)}` });
+    const name = path.basename(entry.projectPath);
+    const body = asking ? `Claude precisa de você em ${name}` : `Claude terminou em ${name}`;
+    const n = new Notification({ title: 'Carcará Code', body });
     n.on('click', () => {
       if (mainWindow && !mainWindow.isDestroyed()) {
         if (mainWindow.isMinimized()) mainWindow.restore();
@@ -897,6 +919,131 @@ async function gitTry(fn) {
   try { return { ok: true, ...(await fn()) }; }
   catch (e) { return { ok: false, error: (e && e.message) ? e.message : String(e) }; }
 }
+
+// ---------- Checkpoints (shadow git: "voltar no tempo") ----------
+// Snapshots do projeto guardados num repositório git PARALELO (GIT_DIR próprio, fora
+// do projeto), com a árvore de trabalho apontando pro projeto. Assim o histórico e o
+// staging do usuário ficam intocados, arquivos untracked entram, e funciona até sem
+// git no projeto. Mesma técnica do Cline. Ver memória "checkpoints-shadow-git".
+const CHECKPOINT_EXCLUDE = [
+  '.git/', 'node_modules/', 'dist/', 'build/', 'out/', '.next/', '.nuxt/',
+  '.svelte-kit/', '.turbo/', '.cache/', 'coverage/', '.venv/', 'venv/',
+  '__pycache__/', '.DS_Store', '*.log',
+].join('\n') + '\n';
+
+function shadowDir(projectPath) {
+  const hash = crypto.createHash('sha1').update(path.resolve(projectPath)).digest('hex').slice(0, 16);
+  return path.join(app.getPath('userData'), 'checkpoints', hash + '.git');
+}
+
+function shadowGit(projectPath) {
+  const dir = shadowDir(projectPath);
+  return gitFor(projectPath).env({ ...process.env, GIT_DIR: dir, GIT_WORK_TREE: path.resolve(projectPath) });
+}
+
+async function ensureShadow(projectPath) {
+  const dir = shadowDir(projectPath);
+  if (!fs.existsSync(path.join(dir, 'HEAD'))) {
+    fs.mkdirSync(dir, { recursive: true });
+    const g = shadowGit(projectPath);
+    await g.raw(['init']);
+    await g.raw(['config', 'user.email', 'checkpoints@carcara.code']);
+    await g.raw(['config', 'user.name', 'Carcará Checkpoints']);
+    await g.raw(['config', 'commit.gpgsign', 'false']);
+    fs.mkdirSync(path.join(dir, 'info'), { recursive: true });
+    fs.writeFileSync(path.join(dir, 'info', 'exclude'), CHECKPOINT_EXCLUDE);
+  }
+}
+
+// Serializa as operações por projeto: várias sessões terminando juntas não podem
+// mexer no mesmo índice ao mesmo tempo (corromperia o shadow repo).
+const checkpointQueues = new Map();
+function withCheckpointLock(projectPath, fn) {
+  const prev = checkpointQueues.get(projectPath) || Promise.resolve();
+  const next = prev.then(fn, fn);
+  checkpointQueues.set(projectPath, next.catch(() => {}));
+  return next;
+}
+
+async function checkpointCreate(projectPath, label, { allowEmpty = false } = {}) {
+  return withCheckpointLock(projectPath, async () => {
+    await ensureShadow(projectPath);
+    const g = shadowGit(projectPath);
+    await g.raw(['add', '-A']);
+    if (!allowEmpty) {
+      const st = (await g.raw(['status', '--porcelain'])).trim();
+      if (!st) return { skipped: true };
+    }
+    const msg = label || ('Checkpoint ' + new Date().toISOString());
+    const args = ['commit', '-m', msg];
+    if (allowEmpty) args.push('--allow-empty');
+    await g.raw(args);
+    const hash = (await g.raw(['rev-parse', 'HEAD'])).trim();
+    return { hash, label: msg };
+  });
+}
+
+async function checkpointList(projectPath) {
+  const dir = shadowDir(projectPath);
+  if (!fs.existsSync(path.join(dir, 'HEAD'))) return [];
+  const g = shadowGit(projectPath);
+  const out = (await g.raw(['log', '--pretty=format:%H%x1f%ct%x1f%s', '-n', '200'])).trim();
+  if (!out) return [];
+  return out.split('\n').map((line) => {
+    const [hash, ts, subject] = line.split('\x1f');
+    return { hash, ts: Number(ts) * 1000, subject };
+  });
+}
+
+// Restaura a árvore EXATAMENTE pro commit alvo (inclusive removendo arquivos criados
+// depois). Tira um snapshot do estado atual antes — então voltar é reversível. O HEAD
+// do shadow não se move: a história inteira segue alcançável (dá pra ir e voltar).
+async function checkpointRestore(projectPath, hash) {
+  await checkpointCreate(projectPath, 'Antes de voltar ' + new Date().toISOString(), { allowEmpty: true });
+  return withCheckpointLock(projectPath, async () => {
+    const g = shadowGit(projectPath);
+    await g.raw(['read-tree', hash]);
+    await g.raw(['checkout-index', '-f', '-a']);
+    await g.raw(['clean', '-fd']);
+    return { ok: true };
+  });
+}
+
+// Auto-checkpoint quando um turno do Claude termina (engatado em activityIdle). Só
+// claude, gateado por config e silencioso quando nada mudou.
+function checkpointsEnabled() { return loadConfig().checkpoints !== false; }
+function scheduleAutoCheckpoint(projectPath) {
+  if (!projectPath || !checkpointsEnabled()) return;
+  checkpointCreate(projectPath, 'Após resposta do Claude ' + new Date().toISOString())
+    .then((r) => { if (r && r.hash) safeSend('checkpoint:added', { projectPath, hash: r.hash }); })
+    .catch(() => {});
+}
+
+ipcMain.handle('checkpoint:list', (evt, { projectPath }) => gitTry(async () => ({ items: await checkpointList(projectPath) })));
+ipcMain.handle('checkpoint:create', (evt, { projectPath, label }) => gitTry(() => checkpointCreate(projectPath, label, { allowEmpty: true })));
+ipcMain.handle('checkpoint:restore', (evt, { projectPath, hash }) => gitTry(() => checkpointRestore(projectPath, hash)));
+ipcMain.handle('checkpoint:getEnabled', () => ({ enabled: checkpointsEnabled() }));
+ipcMain.handle('checkpoint:setEnabled', (evt, { enabled }) => { const c = loadConfig(); c.checkpoints = !!enabled; saveConfig(c); return { ok: true }; });
+
+// ---------- Biblioteca de prompts (por projeto, em .carcara/prompts.json) ----------
+// Prompts reutilizáveis que o usuário injeta no input do chat. Ficam versionáveis
+// junto do projeto (.carcara/), então acompanham o repo e a equipe.
+function promptsFile(projectPath) { return path.join(projectPath, '.carcara', 'prompts.json'); }
+ipcMain.handle('prompts:list', (evt, { projectPath }) => {
+  try {
+    const f = promptsFile(projectPath);
+    if (!fs.existsSync(f)) return { ok: true, items: [] };
+    const items = JSON.parse(fs.readFileSync(f, 'utf8'));
+    return { ok: true, items: Array.isArray(items) ? items : [] };
+  } catch (e) { return { ok: false, error: (e && e.message) || String(e), items: [] }; }
+});
+ipcMain.handle('prompts:save', (evt, { projectPath, items }) => {
+  try {
+    fs.mkdirSync(path.join(projectPath, '.carcara'), { recursive: true });
+    fs.writeFileSync(promptsFile(projectPath), JSON.stringify(items || [], null, 2));
+    return { ok: true };
+  } catch (e) { return { ok: false, error: (e && e.message) || String(e) }; }
+});
 
 ipcMain.handle('git:isRepo', (evt, { projectPath }) =>
   gitTry(async () => ({ isRepo: await gitFor(projectPath).checkIsRepo() })));

@@ -1,20 +1,31 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { ChevronLeft, ChevronRight } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  ChevronLeft, ChevronRight, FolderPlus, Settings, SunMoon,
+  RefreshCw, Square, MessageSquarePlus, PanelLeftClose, Eye, Code2,
+  GitBranch, Zap, Plug, PenTool, History,
+} from 'lucide-react';
 import { RefreshCCWIcon } from './components/ui/refresh-ccw.jsx';
 import { XIcon } from './components/ui/x.jsx';
 import { Rail } from './components/Rail.jsx';
 import { ChatPanel } from './components/ChatPanel.jsx';
 import { PreviewPanel } from './components/PreviewPanel.jsx';
+import { CommandPalette } from './components/CommandPalette.jsx';
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from './components/ui/resizable.jsx';
 import { Button } from './components/ui/button.jsx';
 import { ResizeBar } from './components/ui/resize-bar.jsx';
 import { SettingsModal } from './components/SettingsModal.jsx';
 import { ErrorBoundary } from './components/ErrorBoundary.jsx';
 import { Toaster } from './components/ui/toaster.jsx';
+import { useTheme } from './lib/theme.jsx';
+import { colorFor, initials } from './lib/projectColor';
 
 export default function App() {
+  const { toggle: toggleTheme } = useTheme();
   const [projects, setProjects] = useState([]);
   const [active, setActive] = useState(null);
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  // Ref pra disparar ações que vivem no ChatPanel (ex.: nova sessão) a partir da paleta.
+  const chatControls = useRef(null);
   // Atividade do Claude por projeto: 'working' (pulsa) | 'attention' (terminou, você não viu).
   const [activity, setActivity] = useState({});
   // Refs pra ler valor atual dentro de listeners de longa duração (sem stale closure).
@@ -66,6 +77,51 @@ export default function App() {
 
   useEffect(() => { reload(); }, [reload]);
 
+  // Mantém refs em dia pros listeners de atividade lerem o estado atual.
+  useEffect(() => { activeRef.current = active; }, [active]);
+  useEffect(() => { projectsRef.current = projects; }, [projects]);
+
+  // Atividade do Claude (vinda do main): atualiza o indicador no rail e atende o clique
+  // da notificação do SO (que pede pra abrir o projeto que terminou).
+  useEffect(() => {
+    const offState = window.api.on('activity:state', ({ projectPath, state, asking }) => {
+      setActivity((cur) => {
+        const next = { ...cur };
+        if (state === 'working') {
+          next[projectPath] = 'working';
+        } else if (state === 'done') {
+          // Parou de trabalhar. No projeto ABERTO não marca badge no rail — você já está
+          // olhando, e o detalhe por SESSÃO aparece na aba (ver ChatPanel). Nos outros
+          // projetos vira 'asking' (pediu confirmação) ou 'attention' (só terminou).
+          if (activeRef.current?.path === projectPath) delete next[projectPath];
+          else next[projectPath] = asking ? 'asking' : 'attention';
+        } else {
+          delete next[projectPath]; // idle/exit: limpa
+        }
+        return next;
+      });
+    });
+    const offFocus = window.api.on('activity:focus', ({ projectPath }) => {
+      const p = projectsRef.current.find((x) => x.path === projectPath);
+      if (p) setActive(p);
+    });
+    return () => { offState?.(); offFocus?.(); };
+  }, []);
+
+  // Avisa o main qual projeto está em foco e apaga o badge do rail (atenção/asking) ao
+  // abri-lo — o pulso de "trabalhando" continua, e o detalhe por sessão vai na aba.
+  useEffect(() => {
+    window.api.setActiveProject(active?.path || null);
+    if (active) {
+      setActivity((cur) => {
+        if (cur[active.path] !== 'attention' && cur[active.path] !== 'asking') return cur;
+        const next = { ...cur };
+        delete next[active.path];
+        return next;
+      });
+    }
+  }, [active]);
+
   // Ctrl +/-/0 dão zoom na JANELA do app (rail, chat, abas…). O listener só dispara
   // quando o foco está no app: se estiver DENTRO do preview (webview), o keydown vai
   // pro site e o atalho ali zooma a página (tratado no main). A borda em volta do
@@ -87,7 +143,60 @@ export default function App() {
     return () => window.removeEventListener('keydown', onKey);
   }, []);
 
+  // Ctrl/Cmd+K abre (ou fecha) a paleta de comandos. Como o zoom acima, só pega
+  // quando o foco está no app — dentro do webview do preview o atalho vai pra página.
+  useEffect(() => {
+    const onKey = (e) => {
+      if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        setPaletteOpen((o) => !o);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
   const addProjects = async () => { await window.api.addProjects(); reload(); };
+
+  // Abre um arquivo na aba "Código" do projeto ativo (vindo da paleta de comandos).
+  const openFileFromPalette = (file) => previewControls.current?.openFile?.(file);
+
+  // Comandos da paleta (Ctrl+K). Trocar de projeto, abas do painel, servidor,
+  // sessão de chat, tema e configurações. As ações de painel/servidor passam pelo
+  // previewControls; a nova sessão pelo chatControls; o resto o App resolve direto.
+  const commands = useMemo(() => {
+    const view = (v) => () => previewControls.current?.setView?.(v);
+    const list = [
+      ...projects.map((p) => ({
+        id: 'proj:' + p.path,
+        group: 'Projetos',
+        label: p.name,
+        hint: active?.path === p.path ? 'atual' : 'abrir projeto',
+        // Ícone real do projeto (favicon/logo), igual ao rail; sem ícone, o MESMO
+        // avatar de iniciais e cor do rail (a pessoa associa pelo ícone, não pelo texto).
+        icon: p.icon
+          ? <img src={p.icon} alt="" className="size-4 rounded-sm object-contain" />
+          : <span className="grid size-4 place-items-center rounded-sm text-[7px] font-bold leading-none text-white" style={{ background: colorFor(p.name) }}>{initials(p.name)}</span>,
+        run: () => setActive(p),
+      })),
+      { id: 'view:preview', group: 'Painel', label: 'Preview', hint: 'aba', icon: <Eye />, run: view('preview') },
+      { id: 'view:code', group: 'Painel', label: 'Código', hint: 'aba', icon: <Code2 />, run: view('code') },
+      { id: 'view:git', group: 'Painel', label: 'Git', hint: 'aba', icon: <GitBranch />, run: view('git') },
+      { id: 'view:history', group: 'Painel', label: 'Histórico (checkpoints)', hint: 'aba', icon: <History />, run: view('history') },
+      { id: 'view:api', group: 'Painel', label: 'API', hint: 'aba', icon: <Zap />, run: view('api') },
+      { id: 'view:mcp', group: 'Painel', label: 'MCP', hint: 'aba', icon: <Plug />, run: view('mcp') },
+      { id: 'view:board', group: 'Painel', label: 'Quadro', hint: 'aba', icon: <PenTool />, run: view('board') },
+      { id: 'srv:restart', group: 'Servidor', label: 'Reiniciar servidor', hint: 'preview', icon: <RefreshCw />, run: () => previewControls.current?.restart?.() },
+      { id: 'srv:stop', group: 'Servidor', label: 'Parar servidor', hint: 'preview', icon: <Square />, run: () => previewControls.current?.stop?.() },
+      { id: 'chat:new', group: 'Chat', label: 'Nova sessão de chat', hint: 'aba', icon: <MessageSquarePlus />, run: () => chatControls.current?.newSession?.() },
+      { id: 'chat:toggle', group: 'Chat', label: 'Recolher/expandir chat', icon: <PanelLeftClose />, run: toggleChat },
+      { id: 'app:add', group: 'App', label: 'Adicionar projeto…', icon: <FolderPlus />, run: addProjects },
+      { id: 'app:theme', group: 'App', label: 'Alternar tema claro/escuro', icon: <SunMoon />, run: toggleTheme },
+      { id: 'app:settings', group: 'App', label: 'Configurações', icon: <Settings />, run: () => setSettingsOpen(true) },
+    ];
+    // Sem projeto ativo, ações de painel/servidor/chat ficam inertes — filtra-as.
+    return active ? list : list.filter((c) => c.group === 'Projetos' || c.group === 'App');
+  }, [projects, active, toggleTheme]);
 
   // Reordena (drag-and-drop): atualiza na hora e salva a ordem no config.json.
   const reorderProjects = async (orderedPaths) => {
@@ -112,11 +221,13 @@ export default function App() {
       <Rail
         projects={projects}
         active={active}
+        activity={activity}
         onOpen={setActive}
         onAdd={addProjects}
         onRemove={setPendingRemove}
         onReorder={reorderProjects}
         onOpenSettings={() => setSettingsOpen(true)}
+        onSearch={() => setPaletteOpen(true)}
         width={railWidth}
       />
       <ResizeBar onMouseDown={startRailResize} />
@@ -164,7 +275,7 @@ export default function App() {
             )}
           </div>
           <ErrorBoundary label="Chat">
-            <ChatPanel activeProject={active?.path || null} />
+            <ChatPanel activeProject={active?.path || null} controlsRef={chatControls} />
           </ErrorBoundary>
         </ResizablePanel>
         <ResizableHandle withHandle>
@@ -226,6 +337,13 @@ export default function App() {
       )}
 
       <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />
+      <CommandPalette
+        open={paletteOpen}
+        onClose={() => setPaletteOpen(false)}
+        commands={commands}
+        activePath={active?.path || null}
+        onOpenFile={openFileFromPalette}
+      />
       {railResizing && <div className="fixed inset-0 z-50 cursor-col-resize" />}
       <Toaster />
     </div>

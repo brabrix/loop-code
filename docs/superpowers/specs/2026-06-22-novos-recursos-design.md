@@ -10,13 +10,13 @@ assinatura) sem trazer firula de IDE pesada.
 
 Ordem de construção decidida:
 
-1. **Notificações de atividade por projeto** — *detalhado aqui, aprovado, primeiro a construir*
-2. **Command palette (Ctrl+K)** — *segundo a construir*
-3. **Checkpoints / voltar no tempo**
-4. **Editor de `.env` com máscara**
-5. **Biblioteca de prompts salvos por projeto**
-6. **Toggle plan vs build no chat**
-7. **Publicar/compartilhar preview via túnel (Cloudflare)** — *futuro, fora do escopo imediato*
+1. **Notificações de atividade por projeto** — *construído ✓*
+2. **Command palette (Ctrl+K)** — *construído ✓ (CommandPalette.jsx; Ctrl/Cmd+K)*
+3. **Checkpoints / voltar no tempo** — *construído ✓ (shadow git; aba "Histórico")*
+4. **Editor de `.env` com máscara** — *construído ✓ (EnvEditor no CodeView)*
+5. **Biblioteca de prompts salvos por projeto** — *construído ✓ (.carcara/prompts.json; menu na barra do chat)*
+6. **Toggle plan vs build no chat** — *REMOVIDO (decisão do Ygor 2026-06-22: sem uso)*
+7. **Publicar/compartilhar preview via túnel (Cloudflare)** — *futuro, fora do escopo imediato (não construído)*
 
 Recurso rebaixado a "escondido/avançado": **painel de mudanças da rodada** (diff do que o
 Claude tocou no último turno) — entra atrelado aos checkpoints, não como destaque.
@@ -114,31 +114,50 @@ e **rodar ações** (restart/stop preview, novo session, abrir aba Git/API/MCP/B
 tema, etc.). Overlay minimalista, teclado-first, fecha no Esc. Reaproveita o scoring de
 fuzzy que já existe no CodeView. Aprofundar quando chegarmos nela.
 
-## 3. Checkpoints / voltar no tempo — roadmap
+## 3. Checkpoints / voltar no tempo — CONSTRUÍDO
 
-Na linha que o Ygor descreveu: uma **branch-sombra** que se atualiza ao abrir o projeto,
-permitindo voltar a um checkpoint. Refinar granularidade no design dedicado (a forma mais
-"Lovable" é um checkpoint **por prompt** — snapshot antes de cada mensagem — pra dar o
-"↩ voltar pra antes desta mensagem"; avaliar shadow-branch vs commits ocultos vs stash).
-Aqui se encaixa, **escondido**, o "painel de mudanças da rodada" (diff do que o Claude
-tocou no último turno, aceitar/rejeitar por arquivo).
+**Decisão (pesquisada, confirmada com Cursor/Cline/aider):** em vez de branch no repo do
+usuário, usa um **shadow git repository** — `GIT_DIR` separado, fora do projeto
+(`userData/checkpoints/<hash>.git`), com a árvore de trabalho apontando pro projeto. Mantém
+o histórico/staging do usuário intocados, captura arquivos untracked e funciona até sem git.
 
-## 4. Editor de `.env` com máscara — roadmap
+- **Snapshot:** auto-checkpoint quando o Claude termina um turno (engatado em `activityIdle`,
+  só claude, gateado por config `checkpoints`), pulando quando nada mudou. Mais o botão
+  "Criar" manual.
+- **Restore exato:** `read-tree <hash>` → `checkout-index -f -a` → `clean -fd` (respeita
+  `info/exclude`, então `node_modules` sobrevive). Sempre faz um checkpoint do estado atual
+  ANTES — voltar é reversível, e o HEAD do shadow não se move (história toda alcançável).
+- **UI:** aba "Histórico" (`CheckpointsPanel.jsx`, no menu Ferramentas e na paleta) lista os
+  checkpoints com tempo relativo e botão "Voltar"; toggle "Auto".
+- Backend: `main.js` (`shadowGit`/`checkpointCreate`/`checkpointList`/`checkpointRestore`),
+  `preload.js`, IPC `checkpoint:*`. Sequência de restore validada em sandbox.
 
-Abrir arquivos `.env*` numa visão com valores **mascarados** por padrão (•••), botão de
-revelar por linha, e edição segura — em vez de abrir como texto puro no CodeView. Censura
-visual pra não vazar segredo em screenshot/print.
+Ainda **futuro** (não construído): o "painel de mudanças da rodada" (diff do último turno,
+aceitar/rejeitar por arquivo) e checkpoint *antes* de cada prompt (hoje é após o turno).
+
+## 4. Editor de `.env` com máscara — CONSTRUÍDO
+
+Arquivos `.env*` abrem no `EnvEditor` (dentro do CodeView): valores **mascarados** por
+padrão (•••), revelar por linha (olho) ou tudo, editar/adicionar/remover variáveis. Salva
+pelo mesmo Ctrl+S (escreve no `content` da aba). Ajustes pós-feedback do Ygor:
+- **Comentários e linhas em branco ficam ocultos** no modo mascarado (limpa a visão), mas
+  são **preservados no arquivo** ao salvar (a serialização mantém as linhas "cruas").
+- **Toggle "Ver como texto"** no toolbar volta pro CodeMirror padrão (e "Modo seguro"
+  retorna ao mascarado), por path.
 
 ## 5. Biblioteca de prompts salvos por projeto — roadmap
 
 Prompts reutilizáveis (ex.: "rode os testes e corrija o que quebrar"), salvos por projeto
 (provável em `.carcara/`), inseríveis no input do chat com um atalho/menu.
 
-## 6. Toggle plan vs build no chat — roadmap
+## 6. Toggle plan vs build no chat — REMOVIDO
 
-Como o chat roda sempre em `bypassPermissions`, um botão pra forçar **modo só-planejar**
-(Claude propõe sem editar) antes de liberar a execução. Mapear pro mecanismo de plan mode
-do Claude Code.
+Foi construído e depois **removido a pedido do Ygor (2026-06-22): "não vai ter uso"**.
+Revertido por completo — UI do cabeçalho, comando na paleta, `planModeFor`/flag no
+`buildLaunchCommand`, IPC `planmode:*` e a API no preload. Fica registrado caso volte:
+o caminho determinístico era o flag `claude --permission-mode plan` (Shift+Tab no TUI
+varia por terminal/OS); valores válidos do flag: default, acceptEdits, plan, auto,
+dontAsk, bypassPermissions.
 
 ## 7. Publicar/compartilhar preview via túnel — futuro
 

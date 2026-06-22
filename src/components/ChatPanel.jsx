@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { WebglAddon } from '@xterm/addon-webgl';
-import { Plus, X } from 'lucide-react';
+import { Plus, X, Library, Pencil, Trash2, ArrowUpLeft } from 'lucide-react';
 import '@xterm/xterm/css/xterm.css';
 import { useTheme } from '@/lib/theme.jsx';
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from './ui/resizable.jsx';
@@ -10,6 +10,19 @@ import {
   isPane, firstPane, allPanes, paneCount,
   applyDrop, addSessionToPane, setActiveInPane, closeSessionInTree, reconcile,
 } from '@/lib/paneLayout.js';
+import { cn } from '@/lib/utils';
+
+// Cola texto na sessão via "bracketed paste" emitindo os marcadores nós mesmos
+// (\e[200~ … \e[201~) direto pro pty. NÃO usamos term.paste() do xterm: ele só
+// envolve o texto nos marcadores se achar que o modo está ligado, e esse flag
+// dessincroniza depois da 1ª mensagem (o TUI do Claude/Ink reinicia o input ao
+// processar a resposta). Sem os marcadores, cada \n vira Enter e só a 1ª linha é
+// enviada — o bug de "só um pedaço" nas mensagens seguintes. O prompt do Claude
+// Code sempre aceita bracketed paste, então emitir sempre é seguro.
+function pasteIntoSession(sid, text) {
+  const body = String(text).replace(/\r\n/g, '\n').replace(/\n/g, '\r');
+  window.api.termInput(sid, '\x1b[200~' + body + '\x1b[201~');
+}
 
 const TERM_THEMES = {
   light: {
@@ -84,7 +97,169 @@ const ZONE_STYLE = {
   bottom: { left: 0, right: 0, bottom: 0, height: '50%' },
 };
 
-export function ChatPanel({ activeProject }) {
+// Biblioteca de prompts reutilizáveis (por projeto). O botão fica na barra de abas do
+// chat; clicar num prompt INJETA o texto no terminal da sessão ativa (sem Enter), pra
+// você revisar e enviar. Salva/edita/remove na lista persistida em .carcara/prompts.json.
+function PromptMenu({ projectPath, sessionId, onInsert }) {
+  const [open, setOpen] = useState(false);
+  const [pos, setPos] = useState(null);
+  const [items, setItems] = useState([]);
+  const [draft, setDraft] = useState({ title: '', body: '' });
+  const [editingId, setEditingId] = useState(null);
+  const btnRef = useRef(null);
+
+  const load = async () => {
+    const r = await window.api.promptsList(projectPath);
+    setItems(r && r.ok ? r.items : []);
+  };
+  const persist = (list) => { setItems(list); window.api.promptsSave(projectPath, list); };
+
+  const openMenu = () => {
+    const rect = btnRef.current.getBoundingClientRect();
+    // Ancorado à direita do botão pra não escapar da coluna estreita do chat.
+    setPos({ right: window.innerWidth - rect.right, top: rect.bottom + 4 });
+    setDraft({ title: '', body: '' });
+    setEditingId(null);
+    setOpen(true);
+    load();
+  };
+
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e) => { if (!e.target.closest?.('[data-prompt-menu]')) setOpen(false); };
+    const onKey = (e) => { if (e.key === 'Escape') setOpen(false); };
+    window.addEventListener('mousedown', onDown);
+    window.addEventListener('keydown', onKey);
+    return () => { window.removeEventListener('mousedown', onDown); window.removeEventListener('keydown', onKey); };
+  }, [open]);
+
+  const insert = (p) => {
+    if (sessionId && p.body) onInsert?.(sessionId, p.body);
+    setOpen(false);
+  };
+  const submit = () => {
+    const title = draft.title.trim();
+    const body = draft.body.trim();
+    if (!body) return;
+    if (editingId) {
+      persist(items.map((p) => (p.id === editingId ? { ...p, title: title || body.slice(0, 40), body } : p)));
+    } else {
+      persist([...items, { id: crypto.randomUUID(), title: title || body.slice(0, 40), body }]);
+    }
+    setDraft({ title: '', body: '' });
+    setEditingId(null);
+  };
+  const edit = (p) => { setEditingId(p.id); setDraft({ title: p.title, body: p.body }); };
+  const remove = (p) => {
+    persist(items.filter((x) => x.id !== p.id));
+    if (editingId === p.id) { setEditingId(null); setDraft({ title: '', body: '' }); }
+  };
+
+  return (
+    <>
+      <button
+        ref={btnRef}
+        type="button"
+        onClick={() => (open ? setOpen(false) : openMenu())}
+        title="Biblioteca de prompts"
+        className="grid size-7 shrink-0 place-items-center rounded text-muted-foreground transition-colors hover:bg-muted hover:text-foreground [&_svg]:size-[15px]"
+      >
+        <Library />
+      </button>
+      {open && pos && (
+        <div
+          data-prompt-menu
+          style={{ position: 'fixed', right: pos.right, top: pos.top, zIndex: 60 }}
+          className="flex max-h-[60vh] w-[320px] flex-col overflow-hidden rounded-lg border bg-popover text-foreground shadow-2xl"
+          onMouseDown={(e) => e.stopPropagation()}
+        >
+          <div className="max-h-[40vh] overflow-y-auto p-1.5">
+            {items.length === 0 ? (
+              <p className="px-2 py-4 text-center text-[12.5px] text-muted-foreground">
+                Nenhum prompt salvo ainda.
+              </p>
+            ) : (
+              items.map((p) => (
+                <div key={p.id} className="group flex items-start gap-1 rounded-md px-1 py-0.5 hover:bg-muted/60">
+                  <button
+                    type="button"
+                    onClick={() => insert(p)}
+                    disabled={!sessionId}
+                    title="Inserir no chat"
+                    className="flex min-w-0 flex-1 items-center gap-2 rounded px-1.5 py-1.5 text-left disabled:opacity-50 [&_svg]:size-3.5"
+                  >
+                    <ArrowUpLeft className="shrink-0 text-muted-foreground" />
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-[13px]">{p.title}</span>
+                      <span className="block truncate text-[11px] text-muted-foreground">{p.body}</span>
+                    </span>
+                  </button>
+                  <button type="button" onClick={() => edit(p)} title="Editar"
+                    className="mt-1 grid size-6 shrink-0 place-items-center rounded text-muted-foreground opacity-0 transition hover:bg-muted hover:text-foreground group-hover:opacity-100 [&_svg]:size-3.5">
+                    <Pencil />
+                  </button>
+                  <button type="button" onClick={() => remove(p)} title="Remover"
+                    className="mt-1 grid size-6 shrink-0 place-items-center rounded text-muted-foreground opacity-0 transition hover:bg-destructive/10 hover:text-destructive group-hover:opacity-100 [&_svg]:size-3.5">
+                    <Trash2 />
+                  </button>
+                </div>
+              ))
+            )}
+          </div>
+          <div className="border-t p-2">
+            <input
+              value={draft.title}
+              onChange={(e) => setDraft((d) => ({ ...d, title: e.target.value }))}
+              placeholder="Título (opcional)"
+              className="mb-1.5 h-7 w-full rounded border bg-card px-2 text-[12.5px] outline-none focus:border-primary"
+            />
+            <textarea
+              value={draft.body}
+              onChange={(e) => setDraft((d) => ({ ...d, body: e.target.value }))}
+              placeholder="Prompt — ex.: rode os testes e corrija o que quebrar"
+              rows={2}
+              className="w-full resize-y rounded border bg-card px-2 py-1.5 text-[12.5px] outline-none focus:border-primary"
+            />
+            <div className="mt-1.5 flex justify-end gap-1.5">
+              {editingId && (
+                <button type="button" onClick={() => { setEditingId(null); setDraft({ title: '', body: '' }); }}
+                  className="h-7 rounded px-2 text-[12.5px] text-muted-foreground hover:bg-muted">
+                  Cancelar
+                </button>
+              )}
+              <button type="button" onClick={submit} disabled={!draft.body.trim()}
+                className="h-7 rounded bg-primary px-2.5 text-[12.5px] font-medium text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-40">
+                {editingId ? 'Salvar' : 'Adicionar'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
+// Bolinha de atividade do Claude DENTRO da aba da sessão. Âmbar pulsando = trabalhando;
+// âmbar com halo = pediu uma confirmação (sua vez); âmbar fixo = terminou o turno.
+function SessionActivityDot({ state }) {
+  if (!state) return null;
+  const title = state === 'working' ? 'Claude trabalhando…'
+    : state === 'asking' ? 'Claude pediu uma confirmação'
+    : 'Claude aguardando você';
+  return (
+    <span className="relative flex h-2 w-2 shrink-0" title={title}>
+      {state === 'asking' && (
+        <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-amber-500 opacity-75" />
+      )}
+      <span className={cn(
+        'relative inline-flex h-2 w-2 rounded-full bg-amber-500',
+        state === 'working' && 'animate-pulse'
+      )} />
+    </span>
+  );
+}
+
+export function ChatPanel({ activeProject, controlsRef }) {
   const { terminalTheme } = useTheme();
   const themeRef = useRef(terminalTheme);
   const hostRef = useRef(null);
@@ -92,9 +267,14 @@ export function ChatPanel({ activeProject }) {
   const paneRefs = useRef(new Map());      // paneId -> elemento de conteúdo do pane
 
   const [sessions, setSessions] = useState([]); // todas as sessões do projeto: [{ id, name }]
+  // Atividade do Claude POR SESSÃO: sessionId -> 'working' | 'asking' | 'attention'.
+  // É o detalhe fino (qual aba) que o rail (agregado por projeto) não mostra.
+  const [sessionActivity, setSessionActivity] = useState({});
   const [layout, setLayout] = useState(null);   // árvore de painéis do projeto ativo
   const layoutRef = useRef(null);
   const [focusedPane, setFocusedPane] = useState(null);
+  const focusedPaneRef = useRef(null);
+  focusedPaneRef.current = focusedPane;
 
   // Estado do arrastar de abas.
   const [dragSid, setDragSid] = useState(null);
@@ -149,6 +329,18 @@ export function ChatPanel({ activeProject }) {
       const t = termsRef.current.get(sessionId);
       if (t) t.term.write('\r\n\x1b[90m[sessão encerrada]\x1b[0m\r\n');
     });
+    // Mesmo evento que o App consome pro rail, mas aqui guardamos por sessionId pra
+    // pintar a bolinha na aba certa. 'done' vira 'asking' (pediu confirmação) ou
+    // 'attention' (terminou); 'working' enquanto roda; idle/exit limpa.
+    window.api.on('activity:state', ({ sessionId, state, asking }) => {
+      setSessionActivity((cur) => {
+        const next = { ...cur };
+        if (state === 'working') next[sessionId] = 'working';
+        else if (state === 'done') next[sessionId] = asking ? 'asking' : 'attention';
+        else delete next[sessionId];
+        return next;
+      });
+    });
   }, []);
 
   // Ao trocar de projeto: carrega sessões + restaura/reconcilia o layout salvo.
@@ -196,10 +388,9 @@ export function ChatPanel({ activeProject }) {
 
     // Copiar/colar na sessão do Claude. Ctrl/Cmd+C copia a seleção quando há
     // texto selecionado; sem seleção, deixa virar SIGINT (a CLI trata). Ctrl+Shift+C
-    // sempre copia e Ctrl/Cmd+V cola. Usa o clipboard do Electron via IPC.
-    const paste = () => window.api.readText().then((r) => {
-      if (r && r.text) window.api.termInput(sessionId, r.text);
-    });
+    // sempre copia. A COLAGEM é tratada no listener de 'paste' abaixo (não aqui): aqui
+    // só retornamos false no Ctrl/Cmd+V pra bloquear o \x16, sem disparar a colagem —
+    // se colássemos aqui E no evento 'paste', o texto iria duplicado ("a" → "aa").
     term.attachCustomKeyEventHandler((e) => {
       if (e.type !== 'keydown') return true;
       const mod = e.ctrlKey || e.metaKey;
@@ -211,11 +402,24 @@ export function ChatPanel({ activeProject }) {
         if (sel && e.shiftKey) { window.api.copyText(sel); return false; }
         return true; // sem seleção: Ctrl+C normal (SIGINT)
       }
-      if (k === 'v') { paste(); return false; }
+      if (k === 'v') return false; // a colagem vai pelo evento 'paste' (evita duplicar)
       return true;
     });
 
     term.open(el);
+
+    // Colagem por NOSSA conta, fonte única. O xterm tem um handler nativo de 'paste' na
+    // textarea; se ele rodar junto com o nosso, o texto cola DUAS vezes. Interceptamos o
+    // evento na fase de CAPTURA no container (antes de descer pra textarea do xterm),
+    // cancelamos o nativo e colamos uma vez só via pasteIntoSession (bracketed paste
+    // garantido — multi-linha intacto). Pega Ctrl/Cmd+V e o paste do botão direito.
+    el.addEventListener('paste', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const text = e.clipboardData?.getData('text');
+      if (text) pasteIntoSession(sessionId, text);
+      else window.api.readText().then((r) => { if (r && r.text) pasteIntoSession(sessionId, r.text); });
+    }, true);
     // Renderizador WebGL: pinta o terminal num único canvas de GPU e repinta a
     // cada frame ao rolar, eliminando os glitches de "tinta velha". Se o contexto
     // WebGL cair, descarta o addon e volta pro DOM sozinho.
@@ -278,6 +482,14 @@ export function ChatPanel({ activeProject }) {
     if (te) requestAnimationFrame(() => { try { te.term.focus(); } catch {} });
   };
 
+  // Insere texto na sessão via bracketed paste (ver pasteIntoSession): texto
+  // multi-linha vai inteiro pro input da TUI sem cada \n virar Enter.
+  const insertText = (sid, text) => {
+    pasteIntoSession(sid, text);
+    const te = termsRef.current.get(sid);
+    if (te) requestAnimationFrame(() => { try { te.term.focus(); } catch {} });
+  };
+
   const addSession = async (paneId) => {
     if (!activeProject) return;
     const s = await window.api.sessionsCreate(activeProject);
@@ -286,6 +498,16 @@ export function ChatPanel({ activeProject }) {
     setFocusedPane(paneId);
     focusSession(s.id);
   };
+
+  // Nova sessão a partir da paleta de comandos: cai no pane em foco (ou no primeiro).
+  if (controlsRef) {
+    controlsRef.current = {
+      newSession: () => {
+        const pane = focusedPaneRef.current || firstPane(layoutRef.current)?.id;
+        if (pane) addSession(pane);
+      },
+    };
+  }
 
   const onTabClick = (paneId, sid) => {
     commitLayout(setActiveInPane(layoutRef.current, paneId, sid));
@@ -371,6 +593,7 @@ export function ChatPanel({ activeProject }) {
                 }
               >
                 <span>{sessionNames.get(sid) || 'Sessão'}</span>
+                <SessionActivityDot state={sessionActivity[sid]} />
                 {canClose && (
                   <button
                     type="button"
@@ -392,6 +615,9 @@ export function ChatPanel({ activeProject }) {
           >
             <Plus />
           </button>
+          <div className="ml-auto shrink-0">
+            <PromptMenu projectPath={activeProject} sessionId={p.active} onInsert={insertText} />
+          </div>
         </div>
 
         <div ref={setPaneRef(p.id)} className="relative flex-1 overflow-hidden">
