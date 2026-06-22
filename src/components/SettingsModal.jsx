@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Sun, Moon, X, Check, Paintbrush, Bot, Wrench, Monitor, Terminal, ZoomIn, ZoomOut, RotateCcw, Bell } from 'lucide-react';
+import { Sun, Moon, X, Check, Paintbrush, Bot, Wrench, Monitor, Terminal, ZoomIn, ZoomOut, RotateCcw, Bell, Sparkles, Download, Trash2 } from 'lucide-react';
 import { ClaudeCodeIcon, CodexIcon, OpenCodeIcon, AntigravityIcon } from '@/lib/cliIcons.jsx';
 import { useTheme } from '@/lib/theme.jsx';
 import { Input } from './ui/input.jsx';
@@ -39,6 +39,9 @@ export function SettingsModal({ open, onClose }) {
   const [sel, setSel] = useState({}); // path -> { cli, custom }
   const [zoom, setZoom] = useState(1); // fator de zoom da janela (1 = 100%)
   const [notify, setNotify] = useState(true); // notificar quando o Claude termina
+  const [llmCfg, setLlmCfg] = useState({ enabled: false, features: { commit: false } });
+  const [llmStat, setLlmStat] = useState({ installed: false, sizeBytes: 0 });
+  const [dl, setDl] = useState(null); // { done, total } enquanto baixa; null fora disso
 
   // Lê o zoom atual ao abrir (mesma fonte do atalho Ctrl +/-: webFrame + localStorage).
   useEffect(() => {
@@ -49,6 +52,26 @@ export function SettingsModal({ open, onClose }) {
 
   const toggleNotify = () => {
     setNotify((v) => { const next = !v; window.api.setNotify(next); return next; });
+  };
+
+  const setLlmEnabled = (v) => {
+    setLlmCfg((c) => ({ ...c, enabled: v }));
+    window.api.llmSetConfig({ enabled: v });
+  };
+  const setCommitFeature = (v) => {
+    setLlmCfg((c) => ({ ...c, features: { ...c.features, commit: v } }));
+    window.api.llmSetConfig({ features: { commit: v } });
+  };
+  const doDownload = async () => {
+    setDl({ done: 0, total: 0 });
+    const r = await window.api.llmDownload();
+    setDl(null);
+    if (r?.ok) setLlmStat(r);
+  };
+  const doRemove = async () => {
+    await window.api.llmRemove();
+    const r = await window.api.llmStatus();
+    if (r?.ok) setLlmStat(r);
   };
 
   const applyZoom = (dir) => {
@@ -65,6 +88,14 @@ export function SettingsModal({ open, onClose }) {
       const entries = await Promise.all(list.map(async (p) => [p.path, await window.api.getAi(p.path)]));
       setSel(Object.fromEntries(entries));
     })();
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    window.api.llmGetConfig().then((r) => { if (r?.ok) setLlmCfg(r); }).catch(() => {});
+    window.api.llmStatus().then((r) => { if (r?.ok) setLlmStat(r); }).catch(() => {});
+    const off = window.api.onLlmDownloadProgress((p) => setDl(p));
+    return off;
   }, [open]);
 
   useEffect(() => {
@@ -100,13 +131,14 @@ export function SettingsModal({ open, onClose }) {
         <TabButton active={tab === 'ai'} onClick={() => setTab('ai')} icon={<Bot />}>IA por projeto</TabButton>
         <TabButton active={tab === 'appearance'} onClick={() => setTab('appearance')} icon={<Paintbrush />}>Aparência</TabButton>
         <TabButton active={tab === 'notify'} onClick={() => setTab('notify')} icon={<Bell />}>Notificações</TabButton>
+        <TabButton active={tab === 'llm'} onClick={() => setTab('llm')} icon={<Sparkles />}>Recursos de IA</TabButton>
       </div>
 
       {/* Conteúdo */}
       <div className="flex min-w-0 flex-1 flex-col">
         <div className="flex h-14 shrink-0 items-center border-b px-6">
           <h1 className="text-[15px] font-semibold">
-            {tab === 'ai' ? 'IA por projeto' : tab === 'notify' ? 'Notificações' : 'Aparência'}
+            {tab === 'ai' ? 'IA por projeto' : tab === 'notify' ? 'Notificações' : tab === 'llm' ? 'Recursos de IA' : 'Aparência'}
           </h1>
           <div className="flex-1" />
           <button type="button" onClick={onClose} title="Fechar (Esc)"
@@ -258,6 +290,79 @@ export function SettingsModal({ open, onClose }) {
                   title={notify ? 'Notificações ligadas' : 'Notificações desligadas'}
                   className="mt-0.5" />
               </div>
+            </div>
+          )}
+
+          {tab === 'llm' && (
+            <div className="mx-auto max-w-3xl">
+              <p className="text-sm text-muted-foreground">
+                Uma IA local minúscula, offline, pra tarefas curtas (ex.: sugerir mensagem de commit).
+                É opcional: ative, baixe o modelo uma vez (~400&nbsp;MB) e ligue só o que quiser.
+                Desligada, o app funciona normalmente.
+              </p>
+
+              {/* Master */}
+              <div className="mt-5 flex items-start justify-between gap-4 rounded-lg border p-4">
+                <div className="min-w-0">
+                  <div className="text-[13px] font-medium">Ativar IA local</div>
+                  <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+                    Roda direto no seu computador, sem internet e sem usar sua sessão do Claude.
+                  </p>
+                </div>
+                <Switch checked={llmCfg.enabled} onCheckedChange={setLlmEnabled} className="mt-0.5" />
+              </div>
+
+              {/* Modelo */}
+              {llmCfg.enabled && (
+                <div className="mt-3 rounded-lg border p-4">
+                  <div className="flex items-center justify-between gap-4">
+                    <div className="text-[13px] font-medium">
+                      Modelo local
+                      <span className="ml-2 text-xs font-normal text-muted-foreground">
+                        {dl ? 'baixando…' : llmStat.installed ? 'pronto' : 'não baixado'}
+                      </span>
+                    </div>
+                    {!dl && (llmStat.installed
+                      ? <button type="button" onClick={doRemove}
+                          className="flex items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-[13px] text-muted-foreground transition-colors hover:bg-muted [&_svg]:size-3.5">
+                          <Trash2 /> Remover
+                        </button>
+                      : <button type="button" onClick={doDownload}
+                          className="flex items-center gap-1.5 rounded-md border border-primary px-2.5 py-1.5 text-[13px] text-primary transition-colors hover:bg-muted [&_svg]:size-3.5">
+                          <Download /> Baixar (~400 MB)
+                        </button>)}
+                  </div>
+                  {dl && (
+                    <div className="mt-3">
+                      <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
+                        <div className="h-full bg-primary transition-all"
+                          style={{ width: (dl.total ? Math.round((100 * dl.done) / dl.total) : 0) + '%' }} />
+                      </div>
+                      <div className="mt-1 text-xs tabular-nums text-muted-foreground">
+                        {dl.total ? Math.round((100 * dl.done) / dl.total) : 0}%
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Recursos por toggle */}
+              {llmCfg.enabled && (
+                <div className="mt-3 rounded-lg border p-4">
+                  <div className="text-[13px] font-medium">Recursos</div>
+                  <div className="mt-3 flex items-start justify-between gap-4">
+                    <div className="min-w-0">
+                      <div className="text-[13px]">Botão de sugestão de mensagem de commit</div>
+                      <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+                        Mostra um botão "✨ Gerar" na aba Git que escreve a mensagem a partir do que está em stage.
+                      </p>
+                    </div>
+                    <Switch checked={llmCfg.features.commit} onCheckedChange={setCommitFeature}
+                      disabled={!llmStat.installed} className="mt-0.5" />
+                  </div>
+                  <p className="mt-3 text-xs text-muted-foreground">Títulos de histórico e de prompt: em breve.</p>
+                </div>
+              )}
             </div>
           )}
         </div>
