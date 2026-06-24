@@ -13,6 +13,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { ResizeBar } from './ui/resize-bar.jsx';
 import { EmptyState } from './ui/empty-state.jsx';
 import { McpToolForm } from './McpToolForm.jsx';
+import { McpInspectorDrawer } from './McpInspectorDrawer.jsx';
 import { useTheme } from '@/lib/theme.jsx';
 import { cn } from '@/lib/utils';
 
@@ -41,6 +42,7 @@ export function MCPPanel({ active }) {
   const [command, setCommand] = useState('npx');
   const [argsStr, setArgsStr] = useState('-y @modelcontextprotocol/server-everything');
   const [url, setUrl] = useState('');
+  const [bearer, setBearer] = useState(''); // token Bearer p/ HTTP (não persistido — fica só em memória)
   const [connId, setConnId] = useState(null);
   const [serverInfo, setServerInfo] = useState(null);
   const [caps, setCaps] = useState({});
@@ -49,13 +51,23 @@ export function MCPPanel({ active }) {
   const [log, setLog] = useState('');
   const [logOpen, setLogOpen] = useState(false);
 
+  // Inspector (Bloco C): tráfego JSON-RPC cru + drawer.
+  const [traffic, setTraffic] = useState([]);
+  const seqRef = useRef(0);
+  const [drawerOpen, setDrawerOpen] = useState(() => localStorage.getItem('mcpDrawerOpen') !== '0');
+  const [drawerHeight, setDrawerHeight] = useState(() => Number(localStorage.getItem('mcpDrawerHeight')) || 220);
+
   // Navegação
   const [tab, setTab] = useState('tools');
   const [tools, setTools] = useState([]);
   const [resources, setResources] = useState(null);
+  const [templates, setTemplates] = useState(null); // resource templates (Bloco A)
   const [prompts, setPrompts] = useState(null);
-  const [selected, setSelected] = useState(null); // item selecionado (tool/resource/prompt)
+  const [selected, setSelected] = useState(null); // item selecionado (tool/resource/template/prompt)
   const [formArgs, setFormArgs] = useState({});
+  const [tmplVars, setTmplVars] = useState({}); // valores das variáveis de um resource template
+  const [tmplSuggest, setTmplSuggest] = useState({}); // completions por variável de template
+  const [subscribed, setSubscribed] = useState(() => new Set()); // uris assinadas
   const [running, setRunning] = useState(false);
   const [result, setResult] = useState(null); // { text, isError }
 
@@ -85,15 +97,39 @@ export function MCPPanel({ active }) {
     window.addEventListener('mouseup', onUp);
   };
 
+  const startDrawerResize = (e) => {
+    e.preventDefault();
+    setDragging(true);
+    const onMove = (ev) => {
+      const rect = rootRef.current.getBoundingClientRect();
+      setDrawerHeight(Math.max(120, Math.min(rect.bottom - ev.clientY, rect.height - 180)));
+    };
+    const onUp = () => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+      setDragging(false);
+      setDrawerHeight((h) => { localStorage.setItem('mcpDrawerHeight', String(Math.round(h))); return h; });
+    };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  };
+
+  const toggleDrawer = () => setDrawerOpen((o) => { localStorage.setItem('mcpDrawerOpen', o ? '0' : '1'); return !o; });
+
   // Eventos do main (log do servidor stdio, queda da conexão).
   // Remove os listeners ao desmontar — o painel monta/desmonta a cada troca de aba.
   useEffect(() => {
     const offLog = window.api.on('mcp:log', ({ text }) => setLog((l) => (l + text).slice(-8000)));
+    const offTraffic = window.api.on('mcp:traffic', (e) => {
+      const entry = { ...e, seq: seqRef.current++ };
+      setTraffic((t) => (t.length >= 500 ? [...t.slice(t.length - 499), entry] : [...t, entry]));
+    });
     const offClosed = window.api.on('mcp:closed', () => {
       setConnId(null); setStatus('idle'); setServerInfo(null);
-      setTools([]); setResources(null); setPrompts(null); setSelected(null); setResult(null);
+      setTools([]); setResources(null); setTemplates(null); setPrompts(null); setSubscribed(new Set()); setSelected(null); setResult(null);
+      setTraffic([]); seqRef.current = 0;
     });
-    return () => { offLog?.(); offClosed?.(); };
+    return () => { offLog?.(); offTraffic?.(); offClosed?.(); };
   }, []);
 
   const refreshServers = useCallback(async () => {
@@ -106,13 +142,19 @@ export function MCPPanel({ active }) {
   const buildConfig = () => (
     transport === 'stdio'
       ? { transport: 'stdio', command: command.trim(), args: argsStr.trim() ? argsStr.trim().split(/\s+/) : [] }
-      : { transport: 'http', url: normalizeUrl(url) }
+      : { transport: 'http', url: normalizeUrl(url), ...(bearer.trim() ? { headers: { Authorization: 'Bearer ' + bearer.trim() } } : {}) }
   );
+  // Config sem segredos, p/ persistir em .carcara/mcp-servers.json (o token nunca vai pro disco).
+  const buildSavedConfig = () => {
+    const c = buildConfig();
+    if (c.headers) delete c.headers;
+    return c;
+  };
 
   const connect = async () => {
     if (status === 'connecting') return;
     setStatus('connecting'); setErr(null); setLog(''); setResult(null); setSelected(null);
-    setResources(null); setPrompts(null);
+    setResources(null); setTemplates(null); setPrompts(null); setSubscribed(new Set()); setTraffic([]); seqRef.current = 0;
     const r = await window.api.mcpConnect(buildConfig());
     if (!r.ok) { setStatus('error'); setErr(r.error); setLogOpen(true); return; }
     setConnId(r.connId); setServerInfo(r.serverInfo); setCaps(r.capabilities || {}); setStatus('connected');
@@ -124,7 +166,8 @@ export function MCPPanel({ active }) {
   const disconnect = async () => {
     if (connId) await window.api.mcpDisconnect(connId);
     setConnId(null); setStatus('idle'); setServerInfo(null);
-    setTools([]); setResources(null); setPrompts(null); setSelected(null); setResult(null);
+    setTools([]); setResources(null); setTemplates(null); setPrompts(null); setSubscribed(new Set()); setSelected(null); setResult(null);
+    setTraffic([]); seqRef.current = 0;
   };
 
   // Carrega resources/prompts sob demanda ao abrir a aba.
@@ -133,12 +176,30 @@ export function MCPPanel({ active }) {
     if (tab === 'resources' && resources === null) {
       window.api.mcpListResources(connId).then((r) => setResources(r.ok ? (r.resources || []) : []));
     }
+    if (tab === 'resources' && templates === null) {
+      window.api.mcpListResourceTemplates(connId).then((r) => setTemplates(r.ok ? (r.resourceTemplates || []) : []));
+    }
     if (tab === 'prompts' && prompts === null) {
       window.api.mcpListPrompts(connId).then((r) => setPrompts(r.ok ? (r.prompts || []) : []));
     }
-  }, [tab, connId, resources, prompts]);
+  }, [tab, connId, resources, templates, prompts]);
 
-  const selectItem = (item) => { setSelected(item); setFormArgs({}); setResult(null); setErr(null); };
+  const selectItem = (item) => { setSelected(item); setFormArgs({}); setTmplVars({}); setTmplSuggest({}); setResult(null); setErr(null); };
+
+  // Expande um uriTemplate (RFC 6570 simples: só {var}) com os valores preenchidos.
+  const templateVarNames = (t) => [...new Set((t?.uriTemplate?.match(/\{([^}]+)\}/g) || []).map((s) => s.slice(1, -1)))];
+  const expandTemplate = (t, vars) => (t.uriTemplate || '').replace(/\{([^}]+)\}/g, (_, n) => encodeURIComponent(vars[n] ?? ''));
+
+  const toggleSubscribe = async (uri) => {
+    const on = subscribed.has(uri);
+    const r = on ? await window.api.mcpUnsubscribeResource(connId, uri) : await window.api.mcpSubscribeResource(connId, uri);
+    if (!r.ok) { setErr(r.error); return; }
+    setSubscribed((s) => { const n = new Set(s); on ? n.delete(uri) : n.add(uri); return n; });
+  };
+
+  // Completion (Bloco A): fábrica de callback p/ McpToolForm/datalist. ref = ref/prompt ou ref/resource.
+  const completeArg = (ref) => (argName, value) =>
+    window.api.mcpComplete(connId, ref, argName, value).then((r) => (r.ok ? r.values : []));
 
   const invokeTool = async () => {
     setRunning(true); setResult(null); setErr(null);
@@ -164,7 +225,7 @@ export function MCPPanel({ active }) {
 
   // Coleção (salvar/carregar/excluir)
   const doSave = async (name) => {
-    const r = await window.api.mcpSaveServer(projectPath, name, buildConfig());
+    const r = await window.api.mcpSaveServer(projectPath, name, buildSavedConfig());
     if (!r.ok) { setErr(r.error); return; }
     setCurrentName(name); setNaming(false); setNameDraft(''); refreshServers();
   };
@@ -211,7 +272,10 @@ export function MCPPanel({ active }) {
               <Input value={argsStr} onChange={(e) => setArgsStr(e.target.value)} disabled={connected} placeholder="args (ex: -y @servidor/mcp)" spellCheck={false} className="h-8 flex-1 font-mono text-xs" />
             </>
           ) : (
-            <Input value={url} onChange={(e) => setUrl(e.target.value)} disabled={connected} placeholder="https://servidor.com/mcp" spellCheck={false} className="h-8 flex-1 font-mono text-xs" />
+            <>
+              <Input value={url} onChange={(e) => setUrl(e.target.value)} disabled={connected} placeholder="https://servidor.com/mcp" spellCheck={false} className="h-8 flex-1 font-mono text-xs" />
+              <Input type="password" value={bearer} onChange={(e) => setBearer(e.target.value)} disabled={connected} placeholder="Bearer token (opcional)" spellCheck={false} autoComplete="off" className="h-8 w-[180px] shrink-0 font-mono text-xs" title="Enviado como header Authorization: Bearer …. Não é salvo em disco." />
+            </>
           )}
 
           <Button variant="secondary" size="sm" className="h-8" onClick={onSaveClick} disabled={!projectPath} title={currentName ? `Salvar "${currentName}"` : 'Salvar servidor'}>
@@ -254,13 +318,14 @@ export function MCPPanel({ active }) {
             <span className="text-muted-foreground">{status === 'connecting' ? 'Conectando…' : 'Desconectado'}</span>
           )}
           <div className="flex-1" />
-          {log && (
+          {/* Quando conectado, o stderr vive na aba Logging do Inspector. Aqui só p/ falha de conexão. */}
+          {!connected && log && (
             <button type="button" onClick={() => setLogOpen((o) => !o)} className="flex items-center gap-1 text-muted-foreground hover:text-foreground">
               {logOpen ? <ChevronDown className="size-3.5" /> : <ChevronRight className="size-3.5" />}log
             </button>
           )}
         </div>
-        {logOpen && log && (
+        {!connected && logOpen && log && (
           <pre className="max-h-28 shrink-0 overflow-auto border-b bg-background px-3 py-2 font-mono text-[11px] leading-relaxed text-muted-foreground">{log}</pre>
         )}
 
@@ -280,23 +345,38 @@ export function MCPPanel({ active }) {
             <div className="flex min-h-0 flex-1">
               {/* Lista */}
               <div className="w-[210px] shrink-0 overflow-auto border-r py-1">
-                {list.length === 0 ? (
-                  <p className="px-3 py-2 text-[11px] text-muted-foreground">Nada aqui.</p>
-                ) : (
-                  list.map((it) => {
-                    const key = it.name || it.uri;
-                    const isSel = selected && (selected.name === it.name && selected.uri === it.uri);
+                {(() => {
+                  const itemKey = (it) => it?.uri || it?.uriTemplate || it?.name;
+                  const renderBtn = (it) => {
+                    const isSel = selected && itemKey(selected) === itemKey(it);
                     return (
-                      <button key={key} type="button"
-                        onClick={() => { selectItem(it); if (tab === 'resources') readResource(it.uri); }}
+                      <button key={itemKey(it)} type="button"
+                        onClick={() => { selectItem(it); if (it.uri) readResource(it.uri); }}
                         className={cn('block w-full px-3 py-1.5 text-left text-[13px] hover:bg-muted', isSel && 'bg-accent')}
-                        title={it.description || key}>
-                        <span className="block truncate font-medium">{it.name || it.uri}</span>
+                        title={it.description || itemKey(it)}>
+                        <span className="flex items-center gap-1">
+                          <span className="flex-1 truncate font-medium">{it.name || it.uri || it.uriTemplate}</span>
+                          {it.uri && subscribed.has(it.uri) && <span className="size-1.5 shrink-0 rounded-full bg-primary" title="assinado" />}
+                        </span>
                         {it.description && <span className="block truncate text-[11px] text-muted-foreground">{it.description}</span>}
                       </button>
                     );
-                  })
-                )}
+                  };
+                  if (tab === 'resources') {
+                    const res = resources || [], tpl = templates || [];
+                    if (!res.length && !tpl.length) return <p className="px-3 py-2 text-[11px] text-muted-foreground">Nada aqui.</p>;
+                    return (
+                      <>
+                        {res.map(renderBtn)}
+                        {tpl.length > 0 && <div className="eyebrow px-3 pb-1 pt-2">Templates</div>}
+                        {tpl.map(renderBtn)}
+                      </>
+                    );
+                  }
+                  return list.length === 0
+                    ? <p className="px-3 py-2 text-[11px] text-muted-foreground">Nada aqui.</p>
+                    : list.map(renderBtn);
+                })()}
               </div>
 
               {/* Detalhe */}
@@ -314,15 +394,56 @@ export function MCPPanel({ active }) {
                   </>
                 ) : tab === 'prompts' ? (
                   <>
-                    <McpToolForm schema={argsToSchema(selected.arguments)} value={formArgs} onChange={setFormArgs} />
+                    <McpToolForm schema={argsToSchema(selected.arguments)} value={formArgs} onChange={setFormArgs}
+                      onComplete={caps.completions ? completeArg({ type: 'ref/prompt', name: selected.name }) : undefined} />
                     <div className="mt-3">
                       <Button size="sm" className="h-8" onClick={getPrompt} disabled={running}>
                         {running ? <Loader2 className="mr-1 animate-spin" /> : <Play className="mr-1" />}Obter
                       </Button>
                     </div>
                   </>
+                ) : selected.uriTemplate ? (
+                  <>
+                    <div className="mb-2 break-all font-mono text-[11px] text-muted-foreground">{selected.uriTemplate}</div>
+                    {templateVarNames(selected).length === 0 ? (
+                      <p className="text-xs text-muted-foreground">Template sem variáveis.</p>
+                    ) : (
+                      <div className="space-y-2">
+                        {templateVarNames(selected).map((n) => {
+                          const canComplete = !!caps.completions;
+                          const fetchTmpl = (val) => completeArg({ type: 'ref/resource', uri: selected.uriTemplate })(n, val)
+                            .then((vals) => setTmplSuggest((s) => ({ ...s, [n]: vals || [] }))).catch(() => {});
+                          return (
+                            <label key={n} className="block">
+                              <span className="mb-1 block text-[11px] font-medium text-muted-foreground">{n}</span>
+                              <Input value={tmplVars[n] || ''}
+                                onChange={(e) => { setTmplVars((v) => ({ ...v, [n]: e.target.value })); if (canComplete) fetchTmpl(e.target.value); }}
+                                onFocus={canComplete ? () => fetchTmpl(tmplVars[n] || '') : undefined}
+                                list={canComplete ? `tmpl-${n}` : undefined}
+                                placeholder={n} spellCheck={false} autoComplete="off" className="h-8 font-mono text-xs" />
+                              {canComplete && (tmplSuggest[n] || []).length > 0 && (
+                                <datalist id={`tmpl-${n}`}>{tmplSuggest[n].map((o) => <option key={String(o)} value={String(o)} />)}</datalist>
+                              )}
+                            </label>
+                          );
+                        })}
+                      </div>
+                    )}
+                    <div className="mt-3">
+                      <Button size="sm" className="h-8" onClick={() => readResource(expandTemplate(selected, tmplVars))} disabled={running}>
+                        {running ? <Loader2 className="mr-1 animate-spin" /> : <Play className="mr-1" />}Ler
+                      </Button>
+                    </div>
+                  </>
                 ) : (
-                  <div className="text-xs text-muted-foreground">{selected.uri}</div>
+                  <>
+                    <div className="mb-2 break-all font-mono text-[11px] text-muted-foreground">{selected.uri}</div>
+                    {caps.resources?.subscribe && (
+                      <Button variant={subscribed.has(selected.uri) ? 'secondary' : 'outline'} size="sm" className="h-8" onClick={() => toggleSubscribe(selected.uri)}>
+                        {subscribed.has(selected.uri) ? 'Cancelar assinatura' : 'Assinar atualizações'}
+                      </Button>
+                    )}
+                  </>
                 )}
 
                 {(result || err) && (
@@ -342,6 +463,23 @@ export function MCPPanel({ active }) {
           </div>
         ) : (
           <EmptyState>Conecte a um servidor MCP para inspecionar tools, resources e prompts.</EmptyState>
+        )}
+
+        {/* Inspector (Bloco C): history JSON-RPC, logging, progress, ping */}
+        {connected && (
+          <McpInspectorDrawer
+            open={drawerOpen}
+            onToggle={toggleDrawer}
+            height={drawerHeight}
+            onResizeStart={startDrawerResize}
+            traffic={traffic}
+            truncated={Math.max(0, seqRef.current - traffic.length)}
+            onClear={() => { setTraffic([]); seqRef.current = 0; }}
+            stderr={log}
+            caps={caps}
+            onPing={() => window.api.mcpPing(connId)}
+            onSetLevel={(lvl) => window.api.mcpSetLogLevel(connId, lvl)}
+          />
         )}
       </div>
 

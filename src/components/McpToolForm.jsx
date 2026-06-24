@@ -1,14 +1,23 @@
+import { useId, useState } from 'react';
 import { Input } from './ui/input.jsx';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select.jsx';
 
 // Gera campos a partir do inputSchema (JSON Schema) de uma tool MCP.
 // Suporta como campo: string, number/integer, boolean, enum.
 // object/array (aninhado) => editado como JSON cru no MCPPanel, não aqui. YAGNI.
-export function McpToolForm({ schema, value, onChange }) {
+// onComplete(argName, value) => Promise<string[]>: se passado, campos string ganham
+// autocomplete (datalist) — usado p/ prompts e resource templates (Bloco A). Opcional.
+export function McpToolForm({ schema, value, onChange, onComplete }) {
   const props = (schema && schema.properties) || {};
   const required = (schema && schema.required) || [];
   const names = Object.keys(props);
   const set = (k, v) => onChange({ ...value, [k]: v });
+  const uid = useId();
+  const [suggest, setSuggest] = useState({});
+  const fetchSuggest = (k, v) => {
+    if (!onComplete) return;
+    Promise.resolve(onComplete(k, v)).then((vals) => setSuggest((s) => ({ ...s, [k]: vals || [] }))).catch(() => {});
+  };
 
   if (!names.length) {
     return <p className="text-xs text-muted-foreground">Esta tool não recebe argumentos.</p>;
@@ -51,17 +60,31 @@ export function McpToolForm({ schema, value, onChange }) {
         }
 
         const isNum = p.type === 'number' || p.type === 'integer';
+        const canComplete = !!onComplete && !isNum;
+        const listId = `${uid}-${k}`;
         return (
           <div key={k}>
             {label}
             <Input
               type={isNum ? 'number' : 'text'}
               value={value[k] ?? ''}
-              onChange={(e) => set(k, isNum ? (e.target.value === '' ? '' : Number(e.target.value)) : e.target.value)}
+              onChange={(e) => {
+                const v = isNum ? (e.target.value === '' ? '' : Number(e.target.value)) : e.target.value;
+                set(k, v);
+                if (canComplete) fetchSuggest(k, e.target.value);
+              }}
+              onFocus={canComplete ? () => fetchSuggest(k, value[k] ?? '') : undefined}
+              list={canComplete ? listId : undefined}
               placeholder={p.type || 'string'}
               spellCheck={false}
+              autoComplete="off"
               className="h-8 font-mono text-xs"
             />
+            {canComplete && (suggest[k] || []).length > 0 && (
+              <datalist id={listId}>
+                {suggest[k].map((o) => <option key={String(o)} value={String(o)} />)}
+              </datalist>
+            )}
           </div>
         );
       })}

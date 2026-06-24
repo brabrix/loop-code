@@ -14,6 +14,21 @@ function mcpClient(connId) {
   return c.client;
 }
 
+// Embrulha send/onmessage do transport pra emitir cada mensagem JSON-RPC crua
+// (saída/entrada) num único hook. Captura tudo: requests, responses, logging,
+// progress. Defensivo: ausência de send/onmessage degrada pra "sem traffic".
+function instrumentTransport(tp, hooks) {
+  if (!hooks.onTraffic || !tp) return;
+  try {
+    const origSend = tp.send && tp.send.bind(tp);
+    if (origSend) {
+      tp.send = (m, o) => { try { hooks.onTraffic({ dir: 'out', message: m }); } catch {} return origSend(m, o); };
+    }
+    const origOnMsg = tp.onmessage;
+    tp.onmessage = (m, extra) => { try { hooks.onTraffic({ dir: 'in', message: m }); } catch {} return origOnMsg && origOnMsg(m, extra); };
+  } catch {}
+}
+
 async function mcpConnect({ transport, command, args, env, url, headers } = {}, hooks = {}) {
   const client = new Client({ name: 'carcara-code', version: '0.1.0' }, { capabilities: {} });
 
@@ -41,6 +56,8 @@ async function mcpConnect({ transport, command, args, env, url, headers } = {}, 
     }
   }
 
+  instrumentTransport(tp, hooks);
+
   const connId = crypto.randomUUID();
   const info = { serverInfo: client.getServerVersion(), capabilities: client.getServerCapabilities() };
   if (hooks.onClose) client.onclose = () => { if (mcpConns.has(connId)) { mcpConns.delete(connId); hooks.onClose(connId); } };
@@ -59,4 +76,53 @@ function mcpDisconnectAll() {
   for (const id of [...mcpConns.keys()]) mcpDisconnect(id);
 }
 
-module.exports = { mcpConns, mcpClient, mcpConnect, mcpDisconnect, mcpDisconnectAll };
+// Bloco A — navegação de features.
+// Esgota todas as páginas de um list* paginado (nextCursor). Cap de segurança contra loop infinito.
+async function drainPages(fn, key) {
+  const items = [];
+  let cursor;
+  for (let i = 0; i < 100; i++) {
+    const r = await fn(cursor ? { cursor } : {});
+    if (Array.isArray(r[key])) items.push(...r[key]);
+    cursor = r.nextCursor;
+    if (!cursor) break;
+  }
+  return items;
+}
+async function mcpListResourceTemplates(connId) {
+  const c = mcpClient(connId);
+  return { resourceTemplates: await drainPages((p) => c.listResourceTemplates(p), 'resourceTemplates') };
+}
+async function mcpSubscribeResource(connId, uri) {
+  await mcpClient(connId).subscribeResource({ uri });
+  return { uri };
+}
+async function mcpUnsubscribeResource(connId, uri) {
+  await mcpClient(connId).unsubscribeResource({ uri });
+  return { uri };
+}
+// Completion: autocomplete de argumento de prompt (ref.type 'ref/prompt') ou de
+// variável de resource template (ref.type 'ref/resource'). Retorna até 100 valores.
+async function mcpComplete(connId, ref, argName, argValue) {
+  const r = await mcpClient(connId).complete({ ref, argument: { name: argName, value: argValue || '' } });
+  return { values: (r.completion && r.completion.values) || [], total: r.completion && r.completion.total, hasMore: r.completion && r.completion.hasMore };
+}
+
+// Ping: mede latência de ida-e-volta. Universal, não depende de capability.
+async function mcpPing(connId) {
+  const t0 = Date.now();
+  await mcpClient(connId).ping();
+  return { ms: Date.now() - t0 };
+}
+
+// Pede ao servidor o nível mínimo de logging (debug|info|notice|warning|error|critical|alert|emergency).
+async function mcpSetLogLevel(connId, level) {
+  await mcpClient(connId).setLoggingLevel(level);
+  return { level };
+}
+
+module.exports = {
+  mcpConns, mcpClient, mcpConnect, mcpDisconnect, mcpDisconnectAll,
+  mcpPing, mcpSetLogLevel,
+  drainPages, mcpListResourceTemplates, mcpSubscribeResource, mcpUnsubscribeResource, mcpComplete,
+};

@@ -83,10 +83,16 @@ contextBridge.exposeInMainWorld('api', {
   mcpDisconnect: (connId) => ipcRenderer.invoke('mcp:disconnect', { connId }),
   mcpListTools: (connId) => ipcRenderer.invoke('mcp:listTools', { connId }),
   mcpListResources: (connId) => ipcRenderer.invoke('mcp:listResources', { connId }),
+  mcpListResourceTemplates: (connId) => ipcRenderer.invoke('mcp:listResourceTemplates', { connId }),
   mcpListPrompts: (connId) => ipcRenderer.invoke('mcp:listPrompts', { connId }),
+  mcpSubscribeResource: (connId, uri) => ipcRenderer.invoke('mcp:subscribeResource', { connId, uri }),
+  mcpUnsubscribeResource: (connId, uri) => ipcRenderer.invoke('mcp:unsubscribeResource', { connId, uri }),
+  mcpComplete: (connId, ref, argName, argValue) => ipcRenderer.invoke('mcp:complete', { connId, ref, argName, argValue }),
   mcpCallTool: (connId, name, args) => ipcRenderer.invoke('mcp:callTool', { connId, name, args }),
   mcpReadResource: (connId, uri) => ipcRenderer.invoke('mcp:readResource', { connId, uri }),
   mcpGetPrompt: (connId, name, args) => ipcRenderer.invoke('mcp:getPrompt', { connId, name, args }),
+  mcpPing: (connId) => ipcRenderer.invoke('mcp:ping', { connId }),
+  mcpSetLogLevel: (connId, level) => ipcRenderer.invoke('mcp:setLogLevel', { connId, level }),
   mcpListServers: (projectPath) => ipcRenderer.invoke('mcp:listServers', { projectPath }),
   mcpReadServer: (projectPath, name) => ipcRenderer.invoke('mcp:readServer', { projectPath, name }),
   mcpSaveServer: (projectPath, name, config) => ipcRenderer.invoke('mcp:saveServer', { projectPath, name, config }),
@@ -132,9 +138,11 @@ contextBridge.exposeInMainWorld('api', {
 
   // Código
   listDir: (dirPath) => ipcRenderer.invoke('fs:dir', { dirPath }),
+  watchDir: (dirPath) => ipcRenderer.invoke('fs:watch', { dirPath }),
   searchFiles: (root, query) => ipcRenderer.invoke('fs:search', { root, query }),
   readFile: (filePath) => ipcRenderer.invoke('fs:read', { filePath }),
   writeFile: (filePath, content) => ipcRenderer.invoke('fs:write', { filePath, content }),
+  getXlsxRows: (filePath, sheet, start, count) => ipcRenderer.invoke('xlsx:rows', { filePath, sheet, start, count }),
 
   // Menu de contexto da árvore de arquivos
   revealItem: (targetPath) => ipcRenderer.invoke('fs:reveal', { targetPath }),

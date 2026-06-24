@@ -8,6 +8,7 @@ const http = require('http');
 const detectPort = require('detect-port');
 const mcpCore = require('./mcp-core.cjs');
 const llmCore = require('./llm-core.cjs');
+const claudeSessions = require('./claude-sessions.cjs');
 
 let mainWindow;
 const runningServers = new Map(); // projectPath -> { proc, url, port, log }
@@ -110,6 +111,7 @@ function createWindow() {
       contextIsolation: true,
       nodeIntegration: false,
       webviewTag: true,
+      plugins: true, // habilita o leitor de PDF embutido do Chromium (PdfViewer no preview)
     },
   });
   mainWindow.setMenuBarVisibility(false);
@@ -224,25 +226,7 @@ const AI_CLIS = { claude: 'claude', opencode: 'opencode', agy: 'agy', codex: 'co
 // Procura esse arquivo (em qualquer projeto) E confirma que tem conversa de verdade
 // (ao menos uma mensagem de usuário) — senão o `--resume` falharia com "no conversation".
 function claudeHistoryExists(claudeId) {
-  try {
-    const base = process.env.CLAUDE_CONFIG_DIR
-      ? path.join(process.env.CLAUDE_CONFIG_DIR, 'projects')
-      : path.join(os.homedir(), '.claude', 'projects');
-    for (const d of fs.readdirSync(base)) {
-      const fp = path.join(base, d, claudeId + '.jsonl');
-      try {
-        const st = fs.statSync(fp);
-        if (!st.isFile() || st.size === 0) continue;
-        const fd = fs.openSync(fp, 'r');
-        const buf = Buffer.alloc(Math.min(st.size, 262144)); // 1ª mensagem aparece logo no início
-        fs.readSync(fd, buf, 0, buf.length, 0);
-        fs.closeSync(fd);
-        const head = buf.toString('utf8');
-        if (head.includes('"type":"user"') || head.includes('"role":"user"')) return true;
-      } catch {}
-    }
-  } catch {}
-  return false;
+  return claudeSessions.historyExists(claudeId);
 }
 
 // Acha a metadata da sessão (tab) no config.
@@ -290,7 +274,9 @@ function captureResumeId(entry) {
 
 // Comando que sobe automaticamente em cada nova sessão. Lido fresco do config,
 // então trocar o CLI nas configs vale pras próximas sessões abertas.
-// Retoma a MESMA conversa do tab após fechar/reabrir o app (quando há id salvo).
+// Devolve { cmd, capture, claudeId }: `capture` pede pro term:ensure vigiar o
+// transcript (pra descobrir o id real e o título). Retoma a MESMA conversa do tab
+// SÓ ao reabrir o app inteiro (quando há id com conversa salva); aba nova = em branco.
 function buildLaunchCommand(sessionId, projectPath) {
   const c = loadConfig();
   const { cli, custom } = resolveProjectCli(projectPath, c);
@@ -301,28 +287,74 @@ function buildLaunchCommand(sessionId, projectPath) {
     if (!cid && claudeHistoryExists(sessionId)) cid = sessionId;
     if (cid && claudeHistoryExists(cid)) {           // tem conversa salva → retoma
       if (s && s.claudeId !== cid) { s.claudeId = cid; saveConfig(c); }
-      return `claude --resume ${cid}`;
+      return { cmd: `claude --resume ${cid}`, capture: false, claudeId: cid };
     }
-    // Sem conversa válida (nova, ou "morta" sem mensagens) → cria com um id NOVO,
-    // evitando o erro "Session ID already in use" de reusar um id reservado.
-    const fresh = crypto.randomUUID();
-    if (s) { s.claudeId = fresh; saveConfig(c); }
-    return `claude --session-id ${fresh}`;
+    // Sem conversa válida (aba nova, ou "morta" sem mensagens) → sobe `claude` puro,
+    // igual ao Claude Code real (sem flag de retomada). O id real da conversa é
+    // capturado depois do transcript (capture:true) pra permitir o --resume no restart.
+    return { cmd: 'claude', capture: true, claudeId: null };
   }
   if (cli === 'opencode') {
     const s = getSessionMeta(c, projectPath, sessionId);
-    return s?.resume?.opencode ? `opencode --session ${s.resume.opencode}` : 'opencode';
+    return { cmd: s?.resume?.opencode ? `opencode --session ${s.resume.opencode}` : 'opencode', capture: false };
   }
   if (cli === 'agy') {
     const s = getSessionMeta(c, projectPath, sessionId);
-    return s?.resume?.agy ? `agy --conversation=${s.resume.agy}` : 'agy';
+    return { cmd: s?.resume?.agy ? `agy --conversation=${s.resume.agy}` : 'agy', capture: false };
   }
   if (cli === 'codex') {
     const s = getSessionMeta(c, projectPath, sessionId);
-    return s?.resume?.codex ? `codex resume ${s.resume.codex}` : 'codex';
+    return { cmd: s?.resume?.codex ? `codex resume ${s.resume.codex}` : 'codex', capture: false };
   }
-  if (cli === 'custom') return (custom || '').trim() || 'claude';
-  return AI_CLIS[cli] || 'claude';
+  if (cli === 'custom') return { cmd: (custom || '').trim() || 'claude', capture: false };
+  return { cmd: AI_CLIS[cli] || 'claude', capture: false };
+}
+
+// Salva o id real da conversa do Claude amarrado à aba (pra retomar no restart).
+function saveClaudeId(projectPath, sessionId, claudeId) {
+  const cfg = loadConfig();
+  const s = getSessionMeta(cfg, projectPath, sessionId);
+  if (s && s.claudeId !== claudeId) { s.claudeId = claudeId; saveConfig(cfg); }
+}
+
+// Renomeia a aba com o título que o próprio Claude gera (aiTitle), persistindo e
+// avisando o renderer. Não toca se o nome já é esse.
+function applySessionTitle(projectPath, sessionId, title) {
+  const cfg = loadConfig();
+  const s = getSessionMeta(cfg, projectPath, sessionId);
+  if (s && s.name !== title) {
+    s.name = title;
+    saveConfig(cfg);
+    safeSend('session:meta', { projectPath, sessionId, name: title });
+  }
+}
+
+// Vigia o transcript de uma sessão claude: (1) se ainda não sabemos o id real,
+// acha o transcript novo que apareceu depois do launch; (2) lê o último aiTitle e
+// renomeia a aba. Roda a cada ~1.5s enquanto o pty viver.
+function startClaudeWatcher(entry, capture) {
+  if (capture) entry.preSnapshot = claudeSessions.snapshot(entry.projectPath);
+  const tick = () => {
+    const e = terminals.get(entry.sessionId);
+    if (!e) return; // pty já morreu → watcher para (timer limpo no onExit)
+    try {
+      if (!e.claudeId && e.preSnapshot) {
+        const found = claudeSessions.newTranscript(e.projectPath, e.preSnapshot);
+        if (found) { e.claudeId = found; saveClaudeId(e.projectPath, e.sessionId, found); }
+      }
+      if (e.claudeId) {
+        const fp = claudeSessions.transcriptPath(e.projectPath, e.claudeId);
+        if (fp) {
+          const title = claudeSessions.latestAiTitle(fp);
+          if (title && title !== e.lastTitle) {
+            e.lastTitle = title;
+            applySessionTitle(e.projectPath, e.sessionId, title);
+          }
+        }
+      }
+    } catch {}
+  };
+  entry.titleTimer = setInterval(tick, 1500);
 }
 // CLI por projeto. Cai pro global antigo (cfg.cli) e por fim 'claude'.
 function resolveProjectCli(projectPath, cfg) {
@@ -438,7 +470,7 @@ const IGNORE_DIRS = new Set([
 ]);
 const BINARY_EXT = new Set([
   '.png', '.jpg', '.jpeg', '.gif', '.webp', '.ico', '.bmp', '.avif',
-  '.woff', '.woff2', '.ttf', '.otf', '.eot', '.pdf', '.zip', '.gz', '.tgz',
+  '.woff', '.woff2', '.ttf', '.otf', '.eot', '.zip', '.gz', '.tgz',
   '.rar', '.7z', '.node', '.exe', '.dll', '.so', '.dylib', '.wasm',
   '.mp4', '.mov', '.avi', '.webm', '.mp3', '.wav', '.flac', '.class', '.jar',
 ]);
@@ -450,6 +482,38 @@ ipcMain.handle('fs:dir', (evt, { dirPath }) => {
     .filter((en) => !(en.isDirectory() && IGNORE_DIRS.has(en.name)))
     .map((en) => ({ name: en.name, path: path.join(dirPath, en.name), isDir: en.isDirectory() }))
     .sort((a, b) => (a.isDir === b.isDir ? a.name.localeCompare(b.name) : a.isDir ? -1 : 1));
+});
+
+// Observa o projeto ativo e avisa o renderer quando algo muda no disco (ex.: o
+// Claude cria/remove um arquivo). A árvore então se atualiza sozinha. fs.watch
+// recursivo funciona no Windows/macOS. Mantemos só UM watcher (o do projeto em
+// foco), trocando quando o projeto muda. Eventos vêm em rajada — debounce de 250ms
+// agrupa tudo num único aviso. Ignora ruído de IGNORE_DIRS (node_modules, .git…).
+let fsWatcher = null;
+let fsWatchedDir = null;
+let fsWatchTimer = null;
+function closeFsWatcher() {
+  if (fsWatcher) { try { fsWatcher.close(); } catch {} fsWatcher = null; }
+  if (fsWatchTimer) { clearTimeout(fsWatchTimer); fsWatchTimer = null; }
+  fsWatchedDir = null;
+}
+ipcMain.handle('fs:watch', (evt, { dirPath }) => {
+  if (dirPath === fsWatchedDir) return { ok: true };
+  closeFsWatcher();
+  if (!dirPath) return { ok: true };
+  try {
+    fsWatcher = fs.watch(dirPath, { recursive: true }, (_type, filename) => {
+      // filename é relativo ao dirPath; ignora mudanças dentro de pastas ruidosas.
+      if (filename) {
+        const first = String(filename).split(/[\\/]/)[0];
+        if (IGNORE_DIRS.has(first)) return;
+      }
+      if (fsWatchTimer) clearTimeout(fsWatchTimer);
+      fsWatchTimer = setTimeout(() => { fsWatchTimer = null; safeSend('fs:changed', { dirPath }); }, 250);
+    });
+    fsWatchedDir = dirPath;
+    return { ok: true };
+  } catch (err) { return { error: String(err) }; }
 });
 
 // Subsequência fuzzy (estilo "quick open" do VS Code): todos os caracteres da
@@ -501,7 +565,239 @@ ipcMain.handle('fs:search', (evt, { root, query, limit = 200 }) => {
 
 const IMAGE_EXT = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.avif', '.bmp', '.ico', '.svg']);
 
-ipcMain.handle('fs:read', (evt, { filePath }) => {
+// ---------- Leitura de planilhas (.xlsx/.xlsm) com estilos, pro XlsxViewer ----------
+// O render é paginado (o renderer pede ~150 linhas por vez via 'xlsx:rows'), então
+// mostramos TODAS as linhas até este teto de segurança — não cortamos mais em 2000.
+const XLSX_MAX_ROWS = 100000;
+const XLSX_MAX_COLS = 100;
+const XLSX_CHUNK_MAX = 500; // teto de linhas por requisição de página
+
+// Cor do ExcelJS -> CSS. Só trata ARGB direto (FFRRGGBB); theme/indexed caem pro null
+// (herdam o tema do app), o que é suficiente pra um preview.
+function argbToCss(color) {
+  if (!color || !color.argb || typeof color.argb !== 'string') return null;
+  const argb = color.argb.padStart(8, 'F');
+  const a = parseInt(argb.slice(0, 2), 16);
+  const rgb = argb.slice(2);
+  if (a >= 255) return '#' + rgb;
+  return `rgba(${parseInt(rgb.slice(0, 2), 16)}, ${parseInt(rgb.slice(2, 4), 16)}, ${parseInt(rgb.slice(4, 6), 16)}, ${(a / 255).toFixed(3)})`;
+}
+
+// Extrai só o que o viewer usa do estilo de uma célula. Devolve undefined quando não
+// há nada (mantém o JSON enxuto).
+function cellStyle(cell) {
+  const s = {};
+  const fill = cell.fill;
+  if (fill && fill.type === 'pattern' && fill.pattern === 'solid') {
+    const bg = argbToCss(fill.fgColor);
+    if (bg) s.bg = bg;
+  }
+  const f = cell.font;
+  if (f) {
+    if (f.bold) s.b = 1;
+    if (f.italic) s.i = 1;
+    if (f.underline) s.u = 1;
+    const fc = argbToCss(f.color);
+    if (fc) s.c = fc;
+    if (f.size) s.fs = f.size;
+  }
+  const al = cell.alignment;
+  if (al) {
+    if (al.horizontal) s.ta = al.horizontal;
+    if (al.vertical) s.va = al.vertical;
+    if (al.wrapText) s.wrap = 1;
+  }
+  return Object.keys(s).length ? s : undefined;
+}
+
+// Letra de coluna do Excel ('A','AB') -> índice 1-based.
+function colToNum(letters) {
+  let n = 0;
+  for (const ch of letters) n = n * 26 + (ch.charCodeAt(0) - 64);
+  return n;
+}
+// 'A1' -> { c, r }. 'B2:D5' -> { c, r, cs, rs } pelo bloco.
+function parseMerge(range) {
+  const [a, b] = range.split(':');
+  const ma = a.match(/^([A-Z]+)(\d+)$/i);
+  if (!ma) return null;
+  const c1 = colToNum(ma[1].toUpperCase()), r1 = Number(ma[2]);
+  if (!b) return { c: c1, r: r1, cs: 1, rs: 1 };
+  const mb = b.match(/^([A-Z]+)(\d+)$/i);
+  if (!mb) return { c: c1, r: r1, cs: 1, rs: 1 };
+  const c2 = colToNum(mb[1].toUpperCase()), r2 = Number(mb[2]);
+  return { c: c1, r: r1, cs: c2 - c1 + 1, rs: r2 - r1 + 1 };
+}
+
+// Metadados de uma planilha (sem as linhas): nome, larguras, totais e mapa de merges.
+// O mapa de merges fica só no main (não-serializável e pesado); o renderer recebe os
+// spans já anexados por célula nas faixas de linha.
+function buildXlsxSheetMeta(ws) {
+  const nCols = Math.min(ws.columnCount || 0, XLSX_MAX_COLS);
+  const totalRows = ws.rowCount || 0;
+  const shownRows = Math.min(totalRows, XLSX_MAX_ROWS);
+  // Merges -> mapa "r:c" do master -> {cs, rs}.
+  const mergeMap = new Map();
+  const rawMerges = Array.isArray(ws.model && ws.model.merges) ? ws.model.merges : [];
+  for (const range of rawMerges) {
+    const m = parseMerge(range);
+    if (m && (m.cs > 1 || m.rs > 1)) mergeMap.set(m.r + ':' + m.c, { cs: m.cs, rs: m.rs });
+  }
+  // Larguras de coluna (em "caracteres" do Excel ~ 7px). Default ~8.43.
+  const cols = [];
+  for (let c = 1; c <= nCols; c++) {
+    const w = ws.getColumn(c).width;
+    cols.push(Math.round((w || 8.43) * 7) + 8);
+  }
+  return {
+    name: ws.name, cols, mergeMap,
+    totalRows, totalCols: ws.columnCount || 0,
+    shownRows, shownCols: nCols,
+    truncated: totalRows > XLSX_MAX_ROWS || (ws.columnCount || 0) > XLSX_MAX_COLS,
+  };
+}
+
+// Fatia uma faixa de linhas [start, start+count) de uma worksheet já parseada, com
+// estilos e spans. Esparso: células vazias sem estilo são omitidas (payload enxuto).
+function sliceXlsxRows(ws, meta, start, count) {
+  const nCols = meta.shownCols;
+  const end = Math.min(start + count - 1, meta.shownRows);
+  const rows = [];
+  for (let r = start; r <= end; r++) {
+    const row = ws.getRow(r);
+    const cells = [];
+    for (let c = 1; c <= nCols; c++) {
+      const cell = row.getCell(c);
+      // Célula coberta por um merge (não-master): não renderiza; o master faz o span.
+      if (cell.isMerged && cell.master && cell.master.address !== cell.address) continue;
+      const text = cell.text != null ? String(cell.text) : '';
+      const st = cellStyle(cell);
+      const span = meta.mergeMap.get(r + ':' + c);
+      // Vazia, sem estilo e sem merge: omite (o renderer desenha célula vazia por posição).
+      if (text === '' && !st && !span) continue;
+      const entry = { c, t: text };
+      if (st) entry.s = st;
+      if (span) { if (span.cs > 1) entry.cs = span.cs; if (span.rs > 1) entry.rs = span.rs; }
+      cells.push(entry);
+    }
+    if (cells.length) rows.push({ r, h: row.height ? Math.round(row.height * 1.33) : null, cells });
+  }
+  return rows;
+}
+
+// ----- Formato antigo (.xls / BIFF) via SheetJS: SÓ valores (o formato guarda pouco
+// estilo e a engine community quase não o expõe). Reaproveita o mesmo modelo do .xlsx. -----
+function buildXlsSheetMeta(ws, name) {
+  const XLSX = require('xlsx');
+  if (!ws || !ws['!ref']) {
+    return { name, cols: [], mergeMap: new Map(), totalRows: 0, totalCols: 0, shownRows: 0, shownCols: 0, truncated: false };
+  }
+  const range = XLSX.utils.decode_range(ws['!ref']);
+  const totalRows = range.e.r + 1;
+  const totalCols = range.e.c + 1;
+  const nCols = Math.min(totalCols, XLSX_MAX_COLS);
+  // Merges (0-based) -> mapa "r:c" do master (1-based) -> {cs, rs}.
+  const mergeMap = new Map();
+  for (const m of ws['!merges'] || []) {
+    const cs = m.e.c - m.s.c + 1, rs = m.e.r - m.s.r + 1;
+    if (cs > 1 || rs > 1) mergeMap.set((m.s.r + 1) + ':' + (m.s.c + 1), { cs, rs });
+  }
+  // Larguras: !cols traz wpx/wch quando existe; senão usa o default.
+  const cols = [];
+  const wc = ws['!cols'] || [];
+  for (let c = 0; c < nCols; c++) {
+    const spec = wc[c];
+    const w = spec ? (spec.wpx || (spec.wch ? spec.wch * 7 : 0)) : 0;
+    cols.push((w ? Math.round(w) : Math.round(8.43 * 7)) + 8);
+  }
+  return {
+    name, cols, mergeMap,
+    totalRows, totalCols,
+    shownRows: Math.min(totalRows, XLSX_MAX_ROWS), shownCols: nCols,
+    truncated: totalRows > XLSX_MAX_ROWS || totalCols > XLSX_MAX_COLS,
+  };
+}
+
+function sliceXlsRows(ws, meta, start, count) {
+  const XLSX = require('xlsx');
+  const nCols = meta.shownCols;
+  const end = Math.min(start + count - 1, meta.shownRows);
+  const rows = [];
+  for (let r = start; r <= end; r++) {
+    const cells = [];
+    for (let c = 1; c <= nCols; c++) {
+      const cell = ws[XLSX.utils.encode_cell({ r: r - 1, c: c - 1 })];
+      const span = meta.mergeMap.get(r + ':' + c);
+      // w = texto formatado; v = valor cru. Sem estilo no .xls.
+      const text = cell ? (cell.w != null ? String(cell.w) : (cell.v != null ? String(cell.v) : '')) : '';
+      if (text === '' && !span) continue;
+      const entry = { c, t: text };
+      if (span) { if (span.cs > 1) entry.cs = span.cs; if (span.rs > 1) entry.rs = span.rs; }
+      cells.push(entry);
+    }
+    if (cells.length) rows.push({ r, h: null, cells });
+  }
+  return rows;
+}
+
+// Cache LRU de workbooks parseados (no main), pra paginar linhas sem reabrir o arquivo
+// a cada scroll. Chaveado por caminho + mtime (re-parseia sozinho se o arquivo mudar).
+const xlsxCache = new Map(); // filePath -> { mtimeMs, kind, wb, sheets: meta[] }
+const XLSX_CACHE_MAX = 4;
+
+function parseXlsLegacy(filePath, mtimeMs) {
+  const XLSX = require('xlsx');
+  const wb = XLSX.read(fs.readFileSync(filePath), { type: 'buffer', cellStyles: false, cellDates: true });
+  return { mtimeMs, kind: 'xls', wb, sheets: wb.SheetNames.map((nm) => buildXlsSheetMeta(wb.Sheets[nm], nm)) };
+}
+
+async function parseXlsxModern(filePath, mtimeMs) {
+  const ExcelJS = require('exceljs');
+  const wb = new ExcelJS.Workbook();
+  await wb.xlsx.readFile(filePath);
+  return { mtimeMs, kind: 'xlsx', wb, sheets: wb.worksheets.map(buildXlsxSheetMeta) };
+}
+
+// Abre (ou reusa do cache) uma planilha, escolhendo a engine pelo formato.
+async function openSpreadsheet(filePath) {
+  const st = fs.statSync(filePath);
+  const hit = xlsxCache.get(filePath);
+  if (hit && hit.mtimeMs === st.mtimeMs) {
+    xlsxCache.delete(filePath); xlsxCache.set(filePath, hit); // "toca" a entrada (LRU)
+    return hit;
+  }
+  const ext = path.extname(filePath).toLowerCase();
+  const entry = ext === '.xls' ? parseXlsLegacy(filePath, st.mtimeMs) : await parseXlsxModern(filePath, st.mtimeMs);
+  xlsxCache.set(filePath, entry);
+  while (xlsxCache.size > XLSX_CACHE_MAX) xlsxCache.delete(xlsxCache.keys().next().value);
+  return entry;
+}
+
+// Fatia linhas da aba `idx`, escolhendo o slicer pela engine.
+function sliceRows(entry, idx, start, count) {
+  const meta = entry.sheets[idx];
+  if (!meta) return [];
+  if (entry.kind === 'xls') {
+    const ws = entry.wb.Sheets[entry.wb.SheetNames[idx]];
+    return ws ? sliceXlsRows(ws, meta, start, count) : [];
+  }
+  const ws = entry.wb.worksheets[idx];
+  return ws ? sliceXlsxRows(ws, meta, start, count) : [];
+}
+
+// Metadados serializáveis (sem o mergeMap) pro renderer montar cabeçalhos/larguras.
+function xlsxMetaForRenderer(entry, filePath) {
+  return {
+    filePath,
+    sheets: entry.sheets.map((m) => ({
+      name: m.name, cols: m.cols,
+      totalRows: m.totalRows, totalCols: m.totalCols,
+      shownRows: m.shownRows, shownCols: m.shownCols, truncated: m.truncated,
+    })),
+  };
+}
+
+ipcMain.handle('fs:read', async (evt, { filePath }) => {
   const ext = path.extname(filePath).toLowerCase();
   // Imagens: devolve como data URL pra exibir no visualizador.
   if (IMAGE_EXT.has(ext)) {
@@ -511,11 +807,43 @@ ipcMain.handle('fs:read', (evt, { filePath }) => {
       return { image: toDataUrl(filePath, fs.readFileSync(filePath)), size: st.size };
     } catch (err) { return { error: String(err) }; }
   }
+  // PDF: devolve como data URL pro leitor nativo do Chromium (iframe).
+  if (ext === '.pdf') {
+    try {
+      const st = fs.statSync(filePath);
+      if (st.size > 50 * 1024 * 1024) return { error: 'PDF muito grande (>50MB) pra pré-visualizar' };
+      const buf = fs.readFileSync(filePath);
+      return { pdf: `data:application/pdf;base64,${buf.toString('base64')}`, size: st.size };
+    } catch (err) { return { error: String(err) }; }
+  }
+  // Planilhas: parse no main (uma vez, com cache) e devolve só os metadados. As linhas
+  // vêm sob demanda via 'xlsx:rows' (paginação de ~150 em 150), mantendo payload e
+  // memória baixos. .xlsx/.xlsm com estilos (ExcelJS); .xls antigo só valores (SheetJS).
+  if (ext === '.xlsx' || ext === '.xlsm' || ext === '.xls') {
+    try {
+      const st = fs.statSync(filePath);
+      if (st.size > 25 * 1024 * 1024) return { error: 'planilha muito grande (>25MB) pra pré-visualizar' };
+      const entry = await openSpreadsheet(filePath);
+      return { xlsx: xlsxMetaForRenderer(entry, filePath) };
+    } catch (err) { return { error: 'Não foi possível ler a planilha: ' + ((err && err.message) || String(err)) }; }
+  }
   if (BINARY_EXT.has(ext)) return { binary: true };
   try {
     const st = fs.statSync(filePath);
     if (st.size > 1024 * 1024) return { error: 'arquivo muito grande (>1MB) pra exibir' };
     return { content: fs.readFileSync(filePath, 'utf8') };
+  } catch (err) { return { error: String(err) }; }
+});
+
+// Página de linhas de uma planilha (sob demanda, pro XlsxViewer ir carregando aos
+// poucos). `sheet` é o índice 0-based; `start` é 1-based; devolve linhas esparsas.
+ipcMain.handle('xlsx:rows', async (evt, { filePath, sheet, start, count }) => {
+  try {
+    const entry = await openSpreadsheet(filePath);
+    const idx = Number(sheet) || 0;
+    const n = Math.max(1, Math.min(Number(count) || 150, XLSX_CHUNK_MAX));
+    const s = Math.max(1, Number(start) || 1);
+    return { rows: sliceRows(entry, idx, s, n) };
   } catch (err) { return { error: String(err) }; }
 });
 
@@ -543,11 +871,11 @@ ipcMain.on('drag:start', (evt, filePath) => {
 });
 
 // Abre uma URL no navegador padrão do sistema (sem lock-in: o usuário escolhe).
-// Só http/https — evita abrir esquemas perigosos (file:, etc.) por engano.
+// Só http/https/mailto — evita abrir esquemas perigosos (file:, etc.) por engano.
 ipcMain.handle('shell:openExternal', async (evt, { url }) => {
   try {
     const u = String(url || '').trim();
-    if (!/^https?:\/\//i.test(u)) return { error: 'URL inválida' };
+    if (!/^(https?|mailto):/i.test(u)) return { error: 'URL inválida' };
     await shell.openExternal(u);
     return { ok: true };
   } catch (err) { return { error: String(err) }; }
@@ -680,21 +1008,10 @@ ipcMain.handle('sessions:list', (evt, { projectPath }) => {
 ipcMain.handle('sessions:create', (evt, { projectPath, name }) => {
   const cfg = loadConfig();
   const list = getSessions(cfg, projectPath);
-  // Contador monotônico por projeto: o número só sobe e nunca é reaproveitado,
-  // então cada sessão mantém seu número como identidade permanente (fechar a 2
-  // não faz a próxima virar 2 de novo — vira a 4). Ver main.js histórico do bug.
-  if (!cfg.sessionSeq || typeof cfg.sessionSeq !== 'object') cfg.sessionSeq = {};
-  // Projetos antigos não têm contador salvo: semeia a partir do maior número já
-  // existente (campo `n` ou o número no nome "Sessão N") pra não colidir.
-  if (cfg.sessionSeq[projectPath] == null) {
-    cfg.sessionSeq[projectPath] = list.reduce((max, s) => {
-      const num = s.n ?? parseInt(String(s.name).match(/(\d+)/)?.[1] ?? '0', 10);
-      return Number.isFinite(num) && num > max ? num : max;
-    }, 0);
-  }
-  const n = (cfg.sessionSeq[projectPath] || 0) + 1;
-  cfg.sessionSeq[projectPath] = n;
-  const session = { id: crypto.randomUUID(), name: name || `Sessão ${n}`, n };
+  // Igual ao Claude Code: a aba nasce "Untitled" e, assim que a conversa ganha um
+  // título (aiTitle no transcript), o startClaudeWatcher renomeia. Sem contador
+  // crescente "Sessão N" — aquilo ia ao infinito e não dizia nada do conteúdo.
+  const session = { id: crypto.randomUUID(), name: name || 'Untitled' };
   list.push(session);
   saveConfig(cfg);
   return session;
@@ -845,6 +1162,7 @@ ipcMain.handle('term:ensure', (evt, { sessionId, projectPath, cols, rows, theme 
   });
   proc.onExit(() => {
     if (entry.idleTimer) { clearTimeout(entry.idleTimer); entry.idleTimer = null; }
+    if (entry.titleTimer) { clearInterval(entry.titleTimer); entry.titleTimer = null; }
     terminals.delete(sessionId);
     emitActivity(entry, 'idle'); // limpa o indicador no rail
     safeSend('term:exit', { sessionId });
@@ -854,10 +1172,14 @@ ipcMain.handle('term:ensure', (evt, { sessionId, projectPath, cols, rows, theme 
   // nascer com as cores certas pro fundo (claro/escuro). Só faz sentido pro claude.
   if (cli === 'claude' && theme) applyClaudeTheme(theme);
 
-  // Sobe o CLI de IA escolhido (Claude Code por padrão) automaticamente nessa sessão,
-  // retomando a conversa anterior do tab quando há id salvo.
-  const cmd = buildLaunchCommand(sessionId, projectPath);
-  proc.write(cmd + '\r');
+  // Sobe o CLI de IA escolhido (Claude Code por padrão) automaticamente nessa sessão.
+  // Aba nova = `claude` puro; retoma a conversa só ao reabrir o app (id com histórico).
+  const launch = buildLaunchCommand(sessionId, projectPath);
+  if (cli === 'claude') {
+    entry.claudeId = launch.claudeId || null;
+    startClaudeWatcher(entry, launch.capture); // captura id (se nova) + título da aba
+  }
+  proc.write(launch.cmd + '\r');
   return { existed: false, buffer: '' };
 });
 
@@ -1285,6 +1607,7 @@ ipcMain.handle('mcp:connect', async (evt, { config }) => {
     const res = await mcpCore.mcpConnect(config, {
       onLog: (text) => mainWindow?.webContents.send('mcp:log', { text }),
       onClose: (connId) => mainWindow?.webContents.send('mcp:closed', { connId }),
+      onTraffic: ({ dir, message }) => mainWindow?.webContents.send('mcp:traffic', { dir, message, ts: Date.now() }),
     });
     return { ok: true, ...res };
   } catch (e) { return { ok: false, error: (e && e.message) || String(e) }; }
@@ -1295,16 +1618,33 @@ ipcMain.handle('mcp:disconnect', async (evt, { connId }) => {
   catch (e) { return { ok: false, error: (e && e.message) || String(e) }; }
 });
 
+// Listas paginadas (Bloco A): esgota nextCursor pra trazer todos os itens.
 ipcMain.handle('mcp:listTools', async (e, { connId }) => {
-  try { return { ok: true, ...(await mcpCore.mcpClient(connId).listTools()) }; }
+  try { const c = mcpCore.mcpClient(connId); return { ok: true, tools: await mcpCore.drainPages((p) => c.listTools(p), 'tools') }; }
   catch (err) { return { ok: false, error: err.message }; }
 });
 ipcMain.handle('mcp:listResources', async (e, { connId }) => {
-  try { return { ok: true, ...(await mcpCore.mcpClient(connId).listResources()) }; }
+  try { const c = mcpCore.mcpClient(connId); return { ok: true, resources: await mcpCore.drainPages((p) => c.listResources(p), 'resources') }; }
+  catch (err) { return { ok: false, error: err.message }; }
+});
+ipcMain.handle('mcp:listResourceTemplates', async (e, { connId }) => {
+  try { return { ok: true, ...(await mcpCore.mcpListResourceTemplates(connId)) }; }
   catch (err) { return { ok: false, error: err.message }; }
 });
 ipcMain.handle('mcp:listPrompts', async (e, { connId }) => {
-  try { return { ok: true, ...(await mcpCore.mcpClient(connId).listPrompts()) }; }
+  try { const c = mcpCore.mcpClient(connId); return { ok: true, prompts: await mcpCore.drainPages((p) => c.listPrompts(p), 'prompts') }; }
+  catch (err) { return { ok: false, error: err.message }; }
+});
+ipcMain.handle('mcp:subscribeResource', async (e, { connId, uri }) => {
+  try { return { ok: true, ...(await mcpCore.mcpSubscribeResource(connId, uri)) }; }
+  catch (err) { return { ok: false, error: err.message }; }
+});
+ipcMain.handle('mcp:unsubscribeResource', async (e, { connId, uri }) => {
+  try { return { ok: true, ...(await mcpCore.mcpUnsubscribeResource(connId, uri)) }; }
+  catch (err) { return { ok: false, error: err.message }; }
+});
+ipcMain.handle('mcp:complete', async (e, { connId, ref, argName, argValue }) => {
+  try { return { ok: true, ...(await mcpCore.mcpComplete(connId, ref, argName, argValue)) }; }
   catch (err) { return { ok: false, error: err.message }; }
 });
 
@@ -1314,6 +1654,14 @@ ipcMain.handle('mcp:callTool', async (e, { connId, name, args }) => {
 });
 ipcMain.handle('mcp:readResource', async (e, { connId, uri }) => {
   try { return { ok: true, ...(await mcpCore.mcpClient(connId).readResource({ uri })) }; }
+  catch (err) { return { ok: false, error: err.message }; }
+});
+ipcMain.handle('mcp:ping', async (e, { connId }) => {
+  try { return { ok: true, ...(await mcpCore.mcpPing(connId)) }; }
+  catch (err) { return { ok: false, error: err.message }; }
+});
+ipcMain.handle('mcp:setLogLevel', async (e, { connId, level }) => {
+  try { return { ok: true, ...(await mcpCore.mcpSetLogLevel(connId, level)) }; }
   catch (err) { return { ok: false, error: err.message }; }
 });
 ipcMain.handle('mcp:getPrompt', async (e, { connId, name, args }) => {

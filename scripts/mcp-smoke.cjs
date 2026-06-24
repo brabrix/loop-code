@@ -1,7 +1,10 @@
 // Smoke do ciclo MCP fora do Electron. Usa o mesmo mcp-core.cjs do main.
 // Uso: node scripts/mcp-smoke.cjs            (stdio: server-everything)
 //      node scripts/mcp-smoke.cjs <url>      (HTTP)
-const { mcpConnect, mcpDisconnect, mcpClient } = require('../mcp-core.cjs');
+const { mcpConnect, mcpDisconnect, mcpClient, mcpPing, mcpSetLogLevel,
+  mcpListResourceTemplates, mcpSubscribeResource, mcpUnsubscribeResource, mcpComplete } = require('../mcp-core.cjs');
+
+function assert(cond, msg) { if (!cond) throw new Error('ASSERT: ' + msg); }
 
 async function run() {
   const url = process.argv[2];
@@ -9,8 +12,11 @@ async function run() {
     ? { transport: 'http', url }
     : { transport: 'stdio', command: 'npx', args: ['-y', '@modelcontextprotocol/server-everything'] };
 
+  // Bloco C: captura de tráfego via interceptação do transport.
+  const traffic = [];
   const { connId, serverInfo, capabilities } = await mcpConnect(cfg, {
     onLog: (t) => process.stderr.write('[server] ' + t),
+    onTraffic: (e) => traffic.push(e),
   });
   console.log('conectado:', serverInfo, 'caps:', Object.keys(capabilities || {}));
 
@@ -24,6 +30,46 @@ async function run() {
 
   const echo = await c.callTool({ name: 'echo', arguments: { message: 'oi carcara' } });
   console.log('callTool echo:', JSON.stringify(echo.content));
+
+  // Bloco C: tráfego deve ter capturado saída e entrada, com ao menos um method.
+  const out = traffic.filter((e) => e.dir === 'out');
+  const inc = traffic.filter((e) => e.dir === 'in');
+  assert(out.length >= 1, 'esperava ≥1 mensagem de saída (out)');
+  assert(inc.length >= 1, 'esperava ≥1 mensagem de entrada (in)');
+  assert(traffic.some((e) => e.message && e.message.method), 'esperava ao menos uma mensagem com method');
+  console.log('traffic:', traffic.length, `(out=${out.length}, in=${inc.length})`);
+
+  // Bloco C: ping resolve com latência.
+  const p = await mcpPing(connId);
+  assert(typeof p.ms === 'number', 'ping deve retornar ms numérico');
+  console.log('ping:', p.ms + 'ms');
+
+  // Bloco C: setLevel (server-everything anuncia logging e emite notifications/message).
+  if (capabilities && capabilities.logging) {
+    await mcpSetLogLevel(connId, 'debug');
+    console.log('setLogLevel debug ok');
+  }
+
+  // Bloco A: resource templates, subscribe e completions.
+  const tmpl = await mcpListResourceTemplates(connId).catch(() => ({ resourceTemplates: [] }));
+  console.log('resourceTemplates:', tmpl.resourceTemplates.length, tmpl.resourceTemplates.map((t) => t.uriTemplate).slice(0, 3));
+
+  if (capabilities && capabilities.resources && capabilities.resources.subscribe && resources.resources[0]) {
+    const uri = resources.resources[0].uri;
+    await mcpSubscribeResource(connId, uri);
+    await mcpUnsubscribeResource(connId, uri);
+    console.log('subscribe/unsubscribe ok:', uri);
+  }
+
+  // Completion num template de resource, se houver (server-everything tem ref/resource).
+  if (capabilities && capabilities.completions && tmpl.resourceTemplates[0]) {
+    const t = tmpl.resourceTemplates[0];
+    const varName = (t.uriTemplate.match(/\{(\w+)\}/) || [])[1];
+    if (varName) {
+      const comp = await mcpComplete(connId, { type: 'ref/resource', uri: t.uriTemplate }, varName, '').catch((e) => ({ values: [], err: e.message }));
+      console.log('complete', varName + ':', comp.values.slice(0, 5), comp.err ? '(' + comp.err + ')' : '');
+    }
+  }
 
   await mcpDisconnect(connId);
   console.log('desconectado ok');
