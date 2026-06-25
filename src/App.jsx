@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ChevronLeft, ChevronRight, FolderPlus, Settings, SunMoon,
   RefreshCw, Square, MessageSquarePlus, PanelLeftClose, Eye, Code2,
-  GitBranch, Zap, Plug, PenTool, History,
+  GitBranch, Zap, Plug, PenTool, History, Wrench,
 } from 'lucide-react';
 import { RefreshCCWIcon } from './components/ui/refresh-ccw.jsx';
 import { XIcon } from './components/ui/x.jsx';
@@ -14,6 +14,7 @@ import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from './componen
 import { Button } from './components/ui/button.jsx';
 import { ResizeBar } from './components/ui/resize-bar.jsx';
 import { SettingsModal } from './components/SettingsModal.jsx';
+import { SetupScreen } from './components/SetupScreen.jsx';
 import { ErrorBoundary } from './components/ErrorBoundary.jsx';
 import { Toaster } from './components/ui/toaster.jsx';
 import { useTheme } from './lib/theme.jsx';
@@ -33,6 +34,9 @@ export default function App() {
   const projectsRef = useRef([]);
   const [pendingRemove, setPendingRemove] = useState(null); // projeto aguardando confirmação
   const [settingsOpen, setSettingsOpen] = useState(false);
+  // Tela de preparo do 1º uso: aparece até o usuário concluir uma vez (flag em localStorage).
+  const [setupOpen, setSetupOpen] = useState(() => localStorage.getItem('setupDone') !== '1');
+  const closeSetup = () => { localStorage.setItem('setupDone', '1'); setSetupOpen(false); };
   const [railWidth, setRailWidth] = useState(() => Number(localStorage.getItem('railWidth')) || 64);
   const [railResizing, setRailResizing] = useState(false);
   // Coluna do chat: recolhe pra ganhar espaço no preview. O react-resizable-panels
@@ -193,6 +197,7 @@ export default function App() {
       { id: 'app:add', group: 'App', label: 'Adicionar projeto…', icon: <FolderPlus />, run: addProjects },
       { id: 'app:theme', group: 'App', label: 'Alternar tema claro/escuro', icon: <SunMoon />, run: toggleTheme },
       { id: 'app:settings', group: 'App', label: 'Configurações', icon: <Settings />, run: () => setSettingsOpen(true) },
+      { id: 'app:setup', group: 'App', label: 'Preparar meu PC (ferramentas)', icon: <Wrench />, run: () => setSetupOpen(true) },
     ];
     // Sem projeto ativo, ações de painel/servidor/chat ficam inertes — filtra-as.
     return active ? list : list.filter((c) => c.group === 'Projetos' || c.group === 'App');
@@ -357,6 +362,7 @@ export default function App() {
       )}
 
       <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />
+      <SetupScreen open={setupOpen} onClose={closeSetup} />
       <CommandPalette
         open={paletteOpen}
         onClose={() => setPaletteOpen(false)}

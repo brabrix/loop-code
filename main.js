@@ -1754,6 +1754,18 @@ function cmdAvailable(cmd) {
   return ok;
 }
 
+// Checa as ferramentas externas que o app depende (tela de preparo do 1º uso).
+// SEM cache: o usuário pode ter acabado de instalar algo e clicar em "verificar de novo".
+ipcMain.handle('system:checkTools', () => {
+  const has = (cmd) => {
+    try {
+      const r = require('child_process').spawnSync(cmd, ['--version'], { shell: true, stdio: 'ignore', timeout: 8000 });
+      return !r.error && r.status === 0;
+    } catch { return false; }
+  };
+  return { ok: true, git: has('git'), node: has('node'), npm: has('npm'), claude: has('claude') };
+});
+
 function pickPackageManager(p) {
   // Só usa o gerenciador do lockfile se ele estiver realmente instalado; senão, npm.
   if (fs.existsSync(path.join(p, 'pnpm-lock.yaml')) && cmdAvailable('pnpm')) return 'pnpm';
