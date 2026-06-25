@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "vite build",
     "start": "electron .",
-    "pack:exe": "vite build && electron-builder --win portable"
+    "pack:exe": "vite build && electron-builder --win nsis"
   },
   "build": {
     "appId": "com.carcara.code",
@@ -20,11 +20,18 @@
       "**/node_modules/node-pty/**"
     ],
     "win": {
-      "target": "portable",
+      "target": "nsis",
       "icon": "build/icon.ico"
     },
-    "portable": {
-      "artifactName": "CarcaraCode-portable.exe"
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Carcará Code",
+      "uninstallDisplayName": "Carcará Code ${version}",
+      "artifactName": "CarcaraCode-Setup-${version}.exe"
     }
   },
   "devDependencies": {
