@@ -14,6 +14,7 @@ import { ResizeBar } from './ui/resize-bar.jsx';
 import { EmptyState } from './ui/empty-state.jsx';
 import { McpToolForm } from './McpToolForm.jsx';
 import { McpInspectorDrawer } from './McpInspectorDrawer.jsx';
+import { McpServerRequestModal } from './McpServerRequestModal.jsx';
 import { useTheme } from '@/lib/theme.jsx';
 import { cn } from '@/lib/utils';
 
@@ -32,6 +33,15 @@ function normalizeUrl(u) {
 
 const pretty = (v) => { try { return JSON.stringify(v, null, 2); } catch { return String(v); } };
 
+// Converte caminhos digitados em roots MCP ({uri, name}). Aceita file:// já pronto.
+function pathsToRoots(paths) {
+  return (paths || []).map((p) => (p || '').trim()).filter(Boolean).map((p) => {
+    const norm = p.replace(/\\/g, '/');
+    const uri = /^[a-z][a-z0-9+.-]*:\/\//i.test(norm) ? norm : 'file:///' + norm.replace(/^\/+/, '');
+    return { uri, name: norm.split('/').filter(Boolean).pop() || norm };
+  });
+}
+
 export function MCPPanel({ active }) {
   const { theme } = useTheme();
   const cmTheme = theme === 'dark' ? vscodeDark : vscodeLight;
@@ -43,6 +53,11 @@ export function MCPPanel({ active }) {
   const [argsStr, setArgsStr] = useState('-y @modelcontextprotocol/server-everything');
   const [url, setUrl] = useState('');
   const [bearer, setBearer] = useState(''); // token Bearer p/ HTTP (não persistido — fica só em memória)
+  const [envVars, setEnvVars] = useState([]); // variáveis de ambiente p/ stdio ({key, val})
+  const [timeoutMs, setTimeoutMs] = useState(''); // timeout de request (ms); vazio = padrão do SDK
+  const [advOpen, setAdvOpen] = useState(false); // seção "Avançado" expandida
+  const [rootPaths, setRootPaths] = useState([]); // Bloco B: pastas expostas ao servidor (roots)
+  const [reqQueue, setReqQueue] = useState([]); // Bloco B: requisições do servidor pendentes (sampling/elicitation)
   const [connId, setConnId] = useState(null);
   const [serverInfo, setServerInfo] = useState(null);
   const [caps, setCaps] = useState({});
@@ -126,13 +141,22 @@ export function MCPPanel({ active }) {
       setTraffic((t) => (t.length >= 500 ? [...t.slice(t.length - 499), entry] : [...t, entry]));
     });
     const offOauth = window.api.on('mcp:oauth', ({ phase }) => setOauthPhase(phase));
+    const offReq = window.api.on('mcp:serverRequest', (p) => setReqQueue((q) => [...q, p]));
     const offClosed = window.api.on('mcp:closed', () => {
       setConnId(null); setStatus('idle'); setServerInfo(null);
       setTools([]); setResources(null); setTemplates(null); setPrompts(null); setSubscribed(new Set()); setSelected(null); setResult(null);
-      setTraffic([]); seqRef.current = 0;
+      setTraffic([]); seqRef.current = 0; setReqQueue([]);
     });
-    return () => { offLog?.(); offTraffic?.(); offOauth?.(); offClosed?.(); };
+    return () => { offLog?.(); offTraffic?.(); offOauth?.(); offReq?.(); offClosed?.(); };
   }, []);
+
+  // Bloco B: empurra os roots pro servidor quando mudam (conexão ativa).
+  useEffect(() => { if (connId) window.api.mcpSetRoots(connId, pathsToRoots(rootPaths)); }, [rootPaths, connId]);
+
+  const respondReq = (reqId, result, error) => {
+    window.api.mcpRespondServerRequest(reqId, result, error);
+    setReqQueue((q) => q.filter((r) => r.reqId !== reqId));
+  };
 
   const refreshServers = useCallback(async () => {
     if (!projectPath) { setServers({}); return; }
@@ -142,10 +166,17 @@ export function MCPPanel({ active }) {
   useEffect(() => { refreshServers(); }, [refreshServers]);
 
   const buildConfig = () => {
+    const roots = pathsToRoots(rootPaths);
+    const adv = { ...(Number(timeoutMs) > 0 ? { timeoutMs: Number(timeoutMs) } : {}), ...(roots.length ? { roots } : {}) };
     if (transport === 'stdio') {
-      return { transport: 'stdio', command: command.trim(), args: argsStr.trim() ? argsStr.trim().split(/\s+/) : [] };
+      const env = Object.fromEntries(envVars.filter((x) => x.key.trim()).map((x) => [x.key.trim(), x.val]));
+      return {
+        transport: 'stdio', command: command.trim(),
+        args: argsStr.trim() ? argsStr.trim().split(/\s+/) : [],
+        ...(Object.keys(env).length ? { env } : {}), ...adv,
+      };
     }
-    const base = { transport: 'http', url: normalizeUrl(url) };
+    const base = { transport: 'http', url: normalizeUrl(url), ...adv };
     // Com token → header Bearer. Sem token → OAuth (login no navegador).
     return bearer.trim() ? { ...base, headers: { Authorization: 'Bearer ' + bearer.trim() } } : { ...base, oauth: true };
   };
@@ -159,7 +190,7 @@ export function MCPPanel({ active }) {
   const connect = async () => {
     if (status === 'connecting') return;
     setStatus('connecting'); setErr(null); setLog(''); setResult(null); setSelected(null); setOauthPhase(null);
-    setResources(null); setTemplates(null); setPrompts(null); setSubscribed(new Set()); setTraffic([]); seqRef.current = 0;
+    setResources(null); setTemplates(null); setPrompts(null); setSubscribed(new Set()); setTraffic([]); seqRef.current = 0; setReqQueue([]);
     const r = await window.api.mcpConnect(buildConfig());
     setOauthPhase(null);
     if (!r.ok) { setStatus('error'); setErr(r.error); setLogOpen(true); return; }
@@ -173,7 +204,7 @@ export function MCPPanel({ active }) {
     if (connId) await window.api.mcpDisconnect(connId);
     setConnId(null); setStatus('idle'); setServerInfo(null);
     setTools([]); setResources(null); setTemplates(null); setPrompts(null); setSubscribed(new Set()); setSelected(null); setResult(null);
-    setTraffic([]); seqRef.current = 0;
+    setTraffic([]); seqRef.current = 0; setReqQueue([]);
   };
 
   // Carrega resources/prompts sob demanda ao abrir a aba.
@@ -247,6 +278,9 @@ export function MCPPanel({ active }) {
     setCommand(c.command || 'npx');
     setArgsStr(Array.isArray(c.args) ? c.args.join(' ') : '');
     setUrl(c.url || '');
+    setEnvVars(c.env ? Object.entries(c.env).map(([key, val]) => ({ key, val: String(val) })) : []);
+    setTimeoutMs(c.timeoutMs ? String(c.timeoutMs) : '');
+    setRootPaths(Array.isArray(c.roots) ? c.roots.map((r) => r.uri || '') : []);
     setCurrentName(name);
   };
   const deleteServer = async (name, e) => {
@@ -309,6 +343,63 @@ export function MCPPanel({ active }) {
               className="rounded px-1.5 py-0.5 hover:bg-muted hover:text-foreground disabled:opacity-40">
               Esquecer login
             </button>
+          </div>
+        )}
+
+        {/* Avançado: env vars (stdio) + timeout */}
+        {!connected && (
+          <div className="shrink-0 border-b">
+            <button type="button" onClick={() => setAdvOpen((o) => !o)}
+              className="flex items-center gap-1 px-3 py-1.5 text-[11px] text-muted-foreground hover:text-foreground">
+              {advOpen ? <ChevronDown className="size-3.5" /> : <ChevronRight className="size-3.5" />}
+              Avançado{(envVars.length > 0 || timeoutMs) ? <span className="ml-1 text-primary">•</span> : null}
+            </button>
+            {advOpen && (
+              <div className="space-y-2.5 px-3 pb-2.5">
+                {transport === 'stdio' && (
+                  <div>
+                    <div className="eyebrow mb-1">Variáveis de ambiente</div>
+                    {envVars.map((row, i) => (
+                      <div key={i} className="mb-1 flex items-center gap-1.5">
+                        <Input placeholder="CHAVE" value={row.key} spellCheck={false}
+                          onChange={(e) => setEnvVars((a) => a.map((x, j) => (j === i ? { ...x, key: e.target.value } : x)))}
+                          className="h-7 w-[40%] font-mono text-xs" />
+                        <Input placeholder="valor" value={row.val} spellCheck={false} autoComplete="off"
+                          onChange={(e) => setEnvVars((a) => a.map((x, j) => (j === i ? { ...x, val: e.target.value } : x)))}
+                          className="h-7 flex-1 font-mono text-xs" />
+                        <button type="button" onClick={() => setEnvVars((a) => a.filter((_, j) => j !== i))}
+                          className="grid h-7 w-7 shrink-0 place-items-center rounded text-muted-foreground hover:bg-muted hover:text-red-500 [&_svg]:size-[14px]">
+                          <Trash2 />
+                        </button>
+                      </div>
+                    ))}
+                    <button type="button" onClick={() => setEnvVars((a) => [...a, { key: '', val: '' }])}
+                      className="text-[11px] text-muted-foreground hover:text-foreground">+ adicionar variável</button>
+                  </div>
+                )}
+                <div className="flex items-center gap-2">
+                  <span className="text-[11px] text-muted-foreground">Timeout de request (ms):</span>
+                  <Input type="number" value={timeoutMs} onChange={(e) => setTimeoutMs(e.target.value)}
+                    placeholder="padrão 60000" className="h-7 w-[130px] text-xs" />
+                </div>
+                <div>
+                  <div className="eyebrow mb-1">Roots (pastas expostas ao servidor)</div>
+                  {rootPaths.map((p, i) => (
+                    <div key={i} className="mb-1 flex items-center gap-1.5">
+                      <Input placeholder="C:\\caminho\\pasta ou file:///…" value={p} spellCheck={false}
+                        onChange={(e) => setRootPaths((a) => a.map((x, j) => (j === i ? e.target.value : x)))}
+                        className="h-7 flex-1 font-mono text-xs" />
+                      <button type="button" onClick={() => setRootPaths((a) => a.filter((_, j) => j !== i))}
+                        className="grid h-7 w-7 shrink-0 place-items-center rounded text-muted-foreground hover:bg-muted hover:text-red-500 [&_svg]:size-[14px]">
+                        <Trash2 />
+                      </button>
+                    </div>
+                  ))}
+                  <button type="button" onClick={() => setRootPaths((a) => [...a, projectPath || ''])}
+                    className="text-[11px] text-muted-foreground hover:text-foreground">+ adicionar pasta</button>
+                </div>
+              </div>
+            )}
           </div>
         )}
 
@@ -533,6 +624,9 @@ export function MCPPanel({ active }) {
       </div>
 
       {dragging && <div className="fixed inset-0 z-50 cursor-col-resize" />}
+
+      {/* Bloco B: modal de sampling/elicitation (requisições do servidor) */}
+      <McpServerRequestModal request={reqQueue[0] || null} onRespond={respondReq} />
     </div>
   );
 }

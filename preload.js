@@ -102,6 +102,8 @@ contextBridge.exposeInMainWorld('api', {
   mcpSaveServer: (projectPath, name, config) => ipcRenderer.invoke('mcp:saveServer', { projectPath, name, config }),
   mcpDeleteServer: (projectPath, name) => ipcRenderer.invoke('mcp:deleteServer', { projectPath, name }),
   mcpOauthLogout: (url) => ipcRenderer.invoke('mcp:oauthLogout', { url }),
+  mcpSetRoots: (connId, roots) => ipcRenderer.invoke('mcp:setRoots', { connId, roots }),
+  mcpRespondServerRequest: (reqId, result, error) => ipcRenderer.invoke('mcp:respondServerRequest', { reqId, result, error }),
 
   // Biblioteca de prompts salvos (por projeto, em .carcara/prompts.json)
   promptsList: (projectPath) => ipcRenderer.invoke('prompts:list', { projectPath }),

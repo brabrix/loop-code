@@ -6,6 +6,7 @@ const { StdioClientTransport } = require('@modelcontextprotocol/sdk/client/stdio
 const { StreamableHTTPClientTransport } = require('@modelcontextprotocol/sdk/client/streamableHttp.js');
 const { SSEClientTransport } = require('@modelcontextprotocol/sdk/client/sse.js');
 const { auth } = require('@modelcontextprotocol/sdk/client/auth.js');
+const { ListRootsRequestSchema, CreateMessageRequestSchema, ElicitRequestSchema } = require('@modelcontextprotocol/sdk/types.js');
 
 const mcpConns = new Map(); // connId -> { client, transport, info }
 
@@ -13,6 +14,12 @@ function mcpClient(connId) {
   const c = mcpConns.get(connId);
   if (!c) throw new Error('Conexão MCP não encontrada: ' + connId);
   return c.client;
+}
+
+// Opções de request (Bloco D): aplica o timeout configurado na conexão, se houver.
+function mcpReqOpts(connId) {
+  const c = mcpConns.get(connId);
+  return c && c.timeoutMs ? { timeout: c.timeoutMs } : undefined;
 }
 
 // Embrulha send/onmessage do transport pra emitir cada mensagem JSON-RPC crua
@@ -30,8 +37,20 @@ function instrumentTransport(tp, hooks) {
   } catch {}
 }
 
-async function mcpConnect({ transport, command, args, env, url, headers } = {}, hooks = {}) {
-  const client = new Client({ name: 'carcara-code', version: '0.1.0' }, { capabilities: {} });
+async function mcpConnect({ transport, command, args, env, url, headers, timeoutMs } = {}, hooks = {}) {
+  // Bloco B — capacidades que o cliente fornece. roots sempre; sampling/elicitation
+  // só quando há quem responda (onServerRequest), pra não anunciar o que não atendemos.
+  const capabilities = { roots: { listChanged: true } };
+  if (hooks.onServerRequest) { capabilities.sampling = {}; capabilities.elicitation = {}; }
+  const client = new Client({ name: 'carcara-code', version: '0.1.0' }, { capabilities });
+
+  // Estado de roots (mutável; atualizável por mcpSetRoots).
+  const state = { roots: Array.isArray(hooks.roots) ? hooks.roots : [] };
+  client.setRequestHandler(ListRootsRequestSchema, async () => ({ roots: state.roots }));
+  if (hooks.onServerRequest) {
+    client.setRequestHandler(CreateMessageRequestSchema, (req) => hooks.onServerRequest({ kind: 'sampling', params: req.params }));
+    client.setRequestHandler(ElicitRequestSchema, (req) => hooks.onServerRequest({ kind: 'elicitation', params: req.params }));
+  }
 
   let tp;
   if (transport === 'stdio') {
@@ -78,7 +97,7 @@ async function mcpConnect({ transport, command, args, env, url, headers } = {}, 
   const connId = crypto.randomUUID();
   const info = { serverInfo: client.getServerVersion(), capabilities: client.getServerCapabilities() };
   if (hooks.onClose) client.onclose = () => { if (mcpConns.has(connId)) { mcpConns.delete(connId); hooks.onClose(connId); } };
-  mcpConns.set(connId, { client, transport: tp, info });
+  mcpConns.set(connId, { client, transport: tp, info, timeoutMs: Number(timeoutMs) || 0, state });
   return { connId, serverInfo: info.serverInfo, capabilities: info.capabilities };
 }
 
@@ -125,6 +144,15 @@ async function mcpComplete(connId, ref, argName, argValue) {
   return { values: (r.completion && r.completion.values) || [], total: r.completion && r.completion.total, hasMore: r.completion && r.completion.hasMore };
 }
 
+// Bloco B — atualiza os roots expostos ao servidor e o notifica.
+async function mcpSetRoots(connId, roots) {
+  const c = mcpConns.get(connId);
+  if (!c) return { roots: [] };
+  c.state.roots = Array.isArray(roots) ? roots : [];
+  try { await c.client.sendRootsListChanged(); } catch {}
+  return { roots: c.state.roots };
+}
+
 // Ping: mede latência de ida-e-volta. Universal, não depende de capability.
 async function mcpPing(connId) {
   const t0 = Date.now();
@@ -139,7 +167,8 @@ async function mcpSetLogLevel(connId, level) {
 }
 
 module.exports = {
-  mcpConns, mcpClient, mcpConnect, mcpDisconnect, mcpDisconnectAll,
+  mcpConns, mcpClient, mcpReqOpts, mcpConnect, mcpDisconnect, mcpDisconnectAll,
   mcpPing, mcpSetLogLevel,
   drainPages, mcpListResourceTemplates, mcpSubscribeResource, mcpUnsubscribeResource, mcpComplete,
+  mcpSetRoots,
 };

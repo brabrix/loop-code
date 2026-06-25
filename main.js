@@ -1638,10 +1638,21 @@ ipcMain.handle('http:deleteSaved', (evt, { projectPath, name }) => {
 
 // ---------- MCP connector ----------
 // Cliente MCP roda aqui (Node) via mcp-core.cjs; conexões stateful, 1 ativa por vez.
+
+// Bloco B: ponte de requisições servidor→cliente (sampling/elicitation). O handler
+// no main empurra a requisição pro renderer e espera a resposta do usuário.
+const mcpPending = new Map();
+let mcpReqSeq = 0;
+function rejectAllPending(reason) {
+  for (const [, p] of mcpPending) { try { p.reject(new Error(reason)); } catch {} }
+  mcpPending.clear();
+}
+
 ipcMain.handle('mcp:connect', async (evt, { config }) => {
   let oauth;
   try {
     mcpCore.mcpDisconnectAll(); // uma conexão ativa por vez
+    rejectAllPending('nova conexão');
     // OAuth (Bloco D): HTTP sem Bearer e com oauth=true → login no navegador.
     if (config && config.transport === 'http' && config.oauth) {
       oauth = await mcpOauth.prepare(config.url, {
@@ -1650,13 +1661,31 @@ ipcMain.handle('mcp:connect', async (evt, { config }) => {
     }
     const res = await mcpCore.mcpConnect(config, {
       onLog: (text) => mainWindow?.webContents.send('mcp:log', { text }),
-      onClose: (connId) => mainWindow?.webContents.send('mcp:closed', { connId }),
+      onClose: (connId) => { rejectAllPending('conexão encerrada'); mainWindow?.webContents.send('mcp:closed', { connId }); },
       onTraffic: ({ dir, message }) => mainWindow?.webContents.send('mcp:traffic', { dir, message, ts: Date.now() }),
       oauth,
+      roots: Array.isArray(config?.roots) ? config.roots : [],
+      onServerRequest: ({ kind, params }) => new Promise((resolve, reject) => {
+        const reqId = String(++mcpReqSeq);
+        mcpPending.set(reqId, { resolve, reject });
+        mainWindow?.webContents.send('mcp:serverRequest', { reqId, kind, params });
+      }),
     });
     return { ok: true, ...res };
   } catch (e) { return { ok: false, error: (e && e.message) || String(e) }; }
   finally { try { oauth && oauth.cleanup(); } catch {} }
+});
+// Resposta do usuário a uma requisição do servidor (sampling/elicitation).
+ipcMain.handle('mcp:respondServerRequest', (e, { reqId, result, error }) => {
+  const p = mcpPending.get(reqId);
+  if (!p) return { ok: false };
+  mcpPending.delete(reqId);
+  if (error) p.reject(new Error(error)); else p.resolve(result);
+  return { ok: true };
+});
+ipcMain.handle('mcp:setRoots', async (e, { connId, roots }) => {
+  try { return { ok: true, ...(await mcpCore.mcpSetRoots(connId, roots)) }; }
+  catch (err) { return { ok: false, error: err.message }; }
 });
 ipcMain.handle('mcp:oauthLogout', async (e, { url }) => {
   try { return { ok: mcpOauth.clearTokens(url) }; }

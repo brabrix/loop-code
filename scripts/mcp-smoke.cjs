@@ -2,7 +2,7 @@
 // Uso: node scripts/mcp-smoke.cjs            (stdio: server-everything)
 //      node scripts/mcp-smoke.cjs <url>      (HTTP)
 const { mcpConnect, mcpDisconnect, mcpClient, mcpPing, mcpSetLogLevel,
-  mcpListResourceTemplates, mcpSubscribeResource, mcpUnsubscribeResource, mcpComplete } = require('../mcp-core.cjs');
+  mcpListResourceTemplates, mcpSubscribeResource, mcpUnsubscribeResource, mcpComplete, mcpSetRoots } = require('../mcp-core.cjs');
 
 function assert(cond, msg) { if (!cond) throw new Error('ASSERT: ' + msg); }
 
@@ -17,6 +17,12 @@ async function run() {
   const { connId, serverInfo, capabilities } = await mcpConnect(cfg, {
     onLog: (t) => process.stderr.write('[server] ' + t),
     onTraffic: (e) => traffic.push(e),
+    // Bloco B: expõe um root e responde sampling/elicitation automaticamente no smoke.
+    roots: [{ uri: 'file:///tmp/carcara-smoke', name: 'carcara-smoke' }],
+    onServerRequest: ({ kind }) =>
+      kind === 'sampling'
+        ? { role: 'assistant', content: { type: 'text', text: 'ok' }, model: 'carcara-manual', stopReason: 'endTurn' }
+        : { action: 'accept', content: {} },
   });
   console.log('conectado:', serverInfo, 'caps:', Object.keys(capabilities || {}));
 
@@ -70,6 +76,16 @@ async function run() {
       console.log('complete', varName + ':', comp.values.slice(0, 5), comp.err ? '(' + comp.err + ')' : '');
     }
   }
+
+  // Bloco B: roots — o servidor chama roots/list no cliente e deve ver nosso root.
+  const rootsRes = await c.callTool({ name: 'get-roots-list', arguments: {} }).catch(() => null);
+  if (rootsRes) {
+    assert(JSON.stringify(rootsRes.content).includes('carcara-smoke'), 'esperava nosso root em get-roots-list');
+    console.log('roots bridge ok');
+  }
+  const sr = await mcpSetRoots(connId, [{ uri: 'file:///tmp/outro', name: 'outro' }]).catch(() => null);
+  assert(sr && sr.roots && sr.roots[0] && sr.roots[0].name === 'outro', 'mcpSetRoots deve atualizar os roots');
+  console.log('setRoots ok');
 
   await mcpDisconnect(connId);
   console.log('desconectado ok');
