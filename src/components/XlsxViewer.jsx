@@ -7,6 +7,7 @@
 import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import { Sheet } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { useT } from '@/lib/i18n';
 
 const CHUNK = 150; // linhas por página
 
@@ -38,6 +39,7 @@ function styleOf(s) {
 }
 
 function SheetGrid({ filePath, sheetIndex, meta }) {
+  const t = useT();
   const nCols = meta.shownCols || 0;
   const shownRows = meta.shownRows || 0;
   const cols = meta.cols || [];
@@ -113,7 +115,7 @@ function SheetGrid({ filePath, sheetIndex, meta }) {
   };
 
   if (!nCols || !shownRows) {
-    return <div className="flex h-full items-center justify-center text-sm text-muted-foreground">Planilha vazia.</div>;
+    return <div className="flex h-full items-center justify-center text-sm text-muted-foreground">{t('xlsx.empty_sheet')}</div>;
   }
 
   const rowNums = Array.from({ length: Math.min(loadedUpto, shownRows) }, (_, i) => i + 1);
@@ -181,13 +183,14 @@ function SheetGrid({ filePath, sheetIndex, meta }) {
 }
 
 function XlsxViewer({ data, name }) {
+  const t = useT();
   const sheets = data?.sheets || [];
   const filePath = data?.filePath;
   const [active, setActive] = useState(0);
   const sheet = sheets[active] || sheets[0];
 
   if (!sheets.length || !filePath) {
-    return <div className="flex h-full items-center justify-center text-sm text-muted-foreground">Nenhuma planilha encontrada.</div>;
+    return <div className="flex h-full items-center justify-center text-sm text-muted-foreground">{t('xlsx.no_sheets')}</div>;
   }
 
   return (
@@ -197,12 +200,12 @@ function XlsxViewer({ data, name }) {
         <Sheet className="size-3.5 text-primary" />
         <span className="truncate">{name}</span>
         <span className="opacity-50">·</span>
-        <span>somente leitura</span>
+        <span>{t('xlsx.read_only')}</span>
         <span className="opacity-50">·</span>
-        <span>{sheet.totalRows} linhas</span>
+        <span>{sheet.totalRows} {t('xlsx.rows')}</span>
         {sheet?.truncated && (
           <span className="ml-auto rounded bg-primary/10 px-1.5 py-0.5 text-[11px] text-primary">
-            mostrando {sheet.shownRows}×{sheet.shownCols} de {sheet.totalRows}×{sheet.totalCols}
+            {t('xlsx.truncated', { shownRows: sheet.shownRows, shownCols: sheet.shownCols, totalRows: sheet.totalRows, totalCols: sheet.totalCols })}
           </span>
         )}
       </div>

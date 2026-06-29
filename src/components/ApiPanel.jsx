@@ -20,6 +20,7 @@ import { cn } from '@/lib/utils';
 import { parseCurl } from '@/lib/curl';
 import { loadHistory, addEntry, deleteEntry, clearHistory } from '@/lib/apiHistory';
 import { toast } from '@/lib/toast';
+import { useT } from '@/lib/i18n';
 
 const METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS'];
 
@@ -103,7 +104,8 @@ function normalizeUrl(u) {
 const emptyRow = () => ({ on: true, key: '', val: '' });
 
 // Editor de pares chave/valor (Headers e Query Params).
-function KeyValueEditor({ rows, onChange, placeholderKey = 'Chave', placeholderVal = 'Valor' }) {
+function KeyValueEditor({ rows, onChange, placeholderKey, placeholderVal }) {
+  const t = useT();
   const update = (i, field, value) => onChange(rows.map((r, idx) => (idx === i ? { ...r, [field]: value } : r)));
   const remove = (i) => onChange(rows.filter((_, idx) => idx !== i));
   const add = () => onChange([...rows, emptyRow()]);
@@ -115,24 +117,25 @@ function KeyValueEditor({ rows, onChange, placeholderKey = 'Chave', placeholderV
             type="checkbox"
             checked={r.on}
             onChange={(e) => update(i, 'on', e.target.checked)}
-            title="Ativar/desativar"
+            title={t('api.toggle_tip')}
             className="h-3.5 w-3.5 shrink-0 accent-primary"
           />
-          <Input value={r.key} onChange={(e) => update(i, 'key', e.target.value)} placeholder={placeholderKey} spellCheck={false} className="h-7 font-mono text-xs" />
-          <Input value={r.val} onChange={(e) => update(i, 'val', e.target.value)} placeholder={placeholderVal} spellCheck={false} className="h-7 font-mono text-xs" />
-          <button type="button" onClick={() => remove(i)} title="Remover" className="grid h-7 w-7 shrink-0 place-items-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground [&_svg]:size-[14px]">
+          <Input value={r.key} onChange={(e) => update(i, 'key', e.target.value)} placeholder={placeholderKey ?? t('api.placeholder_param')} spellCheck={false} className="h-7 font-mono text-xs" />
+          <Input value={r.val} onChange={(e) => update(i, 'val', e.target.value)} placeholder={placeholderVal ?? t('api.placeholder_value')} spellCheck={false} className="h-7 font-mono text-xs" />
+          <button type="button" onClick={() => remove(i)} title={t('api.remove_tip')} className="grid h-7 w-7 shrink-0 place-items-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground [&_svg]:size-[14px]">
             <Trash2 />
           </button>
         </div>
       ))}
       <button type="button" onClick={add} className="mt-0.5 flex w-fit items-center gap-1.5 rounded-md px-2 py-1 text-xs text-muted-foreground hover:bg-muted hover:text-foreground [&_svg]:size-[14px]">
-        <Plus />Adicionar
+        <Plus />{t('api.add_button')}
       </button>
     </div>
   );
 }
 
 export function ApiPanel({ active }) {
+  const t = useT();
   const { theme } = useTheme();
   const projectPath = active?.path || null;
 
@@ -282,26 +285,24 @@ export function ApiPanel({ active }) {
     if (!p) return false;
     setMethod(p.method); setUrl(p.url); setParams(p.params); setHeaders(p.headers);
     setBody(p.body); setTab('params'); setRes(null); setErr(null); setSelectedId(null);
-    toast.success('Pronto! Sua chamada foi montada ✨');
+    toast.success(t('api.toast_success'));
     return true;
-  }, []);
-
-  const IMPORT_FAIL = 'Não consegui entender esse comando. Confira se você copiou um cURL completo.';
+  }, [t]);
 
   const openImport = () => { setImportError(''); setImportDraft(''); setImporting(true); };
   const closeImport = () => { setImporting(false); setImportDraft(''); setImportError(''); };
   const doImport = () => {
     if (!importDraft.trim()) return;
     if (applyCurl(importDraft)) closeImport();
-    else setImportError(IMPORT_FAIL);
+    else setImportError(t('api.import_error'));
   };
 
   // Colar um comando cURL direto no campo de URL → importa em vez de colar o texto cru.
   const onUrlPaste = (e) => {
-    const t = e.clipboardData?.getData('text') ?? '';
-    if (!/^\s*curl\b/i.test(t)) return;
+    const pasteText = e.clipboardData?.getData('text') ?? '';
+    if (!/^\s*curl\b/i.test(pasteText)) return;
     e.preventDefault();
-    if (!applyCurl(t)) { setImportDraft(t); setImportError(IMPORT_FAIL); setImporting(true); }
+    if (!applyCurl(pasteText)) { setImportDraft(pasteText); setImportError(t('api.import_error')); setImporting(true); }
   };
 
   // Recarrega no formulário um item do histórico, mostrando também a resposta guardada.
@@ -366,23 +367,23 @@ export function ApiPanel({ active }) {
               ))}
             </SelectContent>
           </Select>
-          <Input value={url} onChange={(e) => setUrl(e.target.value)} onKeyDown={onUrlKey} onPaste={onUrlPaste} placeholder="https://api.exemplo.com/recurso" spellCheck={false} className="h-8 flex-1 font-mono text-xs" />
+          <Input value={url} onChange={(e) => setUrl(e.target.value)} onKeyDown={onUrlKey} onPaste={onUrlPaste} placeholder={t('api.url_placeholder')} spellCheck={false} className="h-8 flex-1 font-mono text-xs" />
 
           {/* Limpar tudo (recomeçar) */}
-          <Button variant="ghost" size="sm" className="h-8 shrink-0" onClick={clearAll} disabled={!url.trim() && !body.trim()} title="Limpar tudo e recomeçar">
-            <Eraser className="mr-1" />Limpar
+          <Button variant="ghost" size="sm" className="h-8 shrink-0" onClick={clearAll} disabled={!url.trim() && !body.trim()} title={t('api.clear_tip')}>
+            <Eraser className="mr-1" />{t('api.clear_button')}
           </Button>
 
           {/* Importar de cURL */}
-          <Button variant="secondary" size="sm" className="h-8 shrink-0" onClick={openImport} title="Importar de um comando cURL (copiado da documentação da API)">
-            <ClipboardPaste className="mr-1" />Importar
+          <Button variant="secondary" size="sm" className="h-8 shrink-0" onClick={openImport} title={t('api.import_tip')}>
+            <ClipboardPaste className="mr-1" />{t('api.import_button')}
           </Button>
 
           {/* Copiar como (dropdown) */}
           <div ref={snippetRef} className="relative shrink-0">
-            <Button variant="secondary" size="sm" className="h-8" onClick={() => setSnippetOpen((o) => !o)} disabled={!url.trim()} title="Copiar como código">
+            <Button variant="secondary" size="sm" className="h-8" onClick={() => setSnippetOpen((o) => !o)} disabled={!url.trim()} title={t('api.copy_tip')}>
               {copied ? <Check className="mr-1 text-green-500" /> : <Code2 className="mr-1" />}
-              {copied ? 'Copiado!' : 'Copiar'}
+              {copied ? t('api.copy_button_done') : t('api.copy_button')}
             </Button>
             {snippetOpen && (
               <div className="absolute right-0 top-9 z-50 min-w-[180px] overflow-hidden rounded-md border bg-background py-1 shadow-md">
@@ -395,8 +396,8 @@ export function ApiPanel({ active }) {
             )}
           </div>
 
-          <Button size="sm" className="h-8" onClick={send} disabled={loading || !url.trim()} title="Enviar (salva no histórico automaticamente)">
-            {loading ? <Loader2 className="mr-1 animate-spin" /> : <HoverIcon as={ConnectIcon} className="mr-1" />}Enviar
+          <Button size="sm" className="h-8" onClick={send} disabled={loading || !url.trim()} title={t('api.send_tip')}>
+            {loading ? <Loader2 className="mr-1 animate-spin" /> : <HoverIcon as={ConnectIcon} className="mr-1" />}{t('api.send_button')}
           </Button>
         </div>
 
@@ -404,7 +405,7 @@ export function ApiPanel({ active }) {
         {importing && (
           <div className="flex shrink-0 flex-col gap-1 border-b bg-muted/40 px-2.5 py-2">
             <div className="flex items-center gap-2">
-              <span className="shrink-0 text-xs text-muted-foreground">Colar cURL:</span>
+              <span className="shrink-0 text-xs text-muted-foreground">{t('api.import_bar_label')}</span>
               <Input
                 autoFocus
                 value={importDraft}
@@ -413,12 +414,12 @@ export function ApiPanel({ active }) {
                   if (e.key === 'Enter') doImport();
                   else if (e.key === 'Escape') closeImport();
                 }}
-                placeholder="Cole aqui o comando que você copiou da documentação da API"
+                placeholder={t('api.import_bar_placeholder')}
                 spellCheck={false}
                 className="h-7 flex-1 font-mono text-xs"
               />
-              <Button size="sm" className="h-7" onClick={doImport} disabled={!importDraft.trim()}>Importar</Button>
-              <Button variant="ghost" size="sm" className="h-7" onClick={closeImport}>Cancelar</Button>
+              <Button size="sm" className="h-7" onClick={doImport} disabled={!importDraft.trim()}>{t('api.import_bar_confirm')}</Button>
+              <Button variant="ghost" size="sm" className="h-7" onClick={closeImport}>{t('api.import_bar_cancel')}</Button>
             </div>
             {importError && <span className="text-[11px] text-red-500">{importError}</span>}
           </div>
@@ -430,18 +431,18 @@ export function ApiPanel({ active }) {
             <div className="shrink-0 px-2.5 pt-2.5">
               <Tabs value={tab} onValueChange={setTab}>
                 <TabsList className="h-8 gap-0.5 p-0.5">
-                  <TabsTrigger value="params" className="h-7 px-2.5 text-xs">Params</TabsTrigger>
-                  <TabsTrigger value="headers" className="h-7 px-2.5 text-xs">Headers</TabsTrigger>
-                  {hasBody && <TabsTrigger value="body" className="h-7 px-2.5 text-xs">Body</TabsTrigger>}
+                  <TabsTrigger value="params" className="h-7 px-2.5 text-xs">{t('api.tabs_params')}</TabsTrigger>
+                  <TabsTrigger value="headers" className="h-7 px-2.5 text-xs">{t('api.tabs_headers')}</TabsTrigger>
+                  {hasBody && <TabsTrigger value="body" className="h-7 px-2.5 text-xs">{t('api.tabs_body')}</TabsTrigger>}
                 </TabsList>
               </Tabs>
             </div>
             <div className="min-h-0 flex-1 p-2.5">
-              {tab === 'params' && <KeyValueEditor rows={params} onChange={setParams} placeholderKey="Parâmetro" placeholderVal="Valor" />}
-              {tab === 'headers' && <KeyValueEditor rows={headers} onChange={setHeaders} placeholderKey="Header" placeholderVal="Valor" />}
+              {tab === 'params' && <KeyValueEditor rows={params} onChange={setParams} placeholderKey={t('api.placeholder_param')} placeholderVal={t('api.placeholder_value')} />}
+              {tab === 'headers' && <KeyValueEditor rows={headers} onChange={setHeaders} placeholderKey={t('api.placeholder_header')} placeholderVal={t('api.placeholder_value')} />}
               {tab === 'body' && hasBody && (
                 <div className="h-full min-h-[120px] overflow-hidden rounded-md border">
-                  <CodeMirror value={body} theme={theme === 'dark' ? vscodeDark : vscodeLight} height="100%" style={{ height: '100%' }} extensions={[editorTheme, json()]} placeholder='{ "exemplo": true }' onChange={setBody} />
+                  <CodeMirror value={body} theme={theme === 'dark' ? vscodeDark : vscodeLight} height="100%" style={{ height: '100%' }} extensions={[editorTheme, json()]} placeholder={t('api.body_placeholder')} onChange={setBody} />
                 </div>
               )}
             </div>
@@ -452,7 +453,7 @@ export function ApiPanel({ active }) {
           {/* Resposta */}
           <div className="flex min-h-0 flex-1 flex-col">
             <div className="flex h-9 shrink-0 items-center gap-3 border-b px-3 text-xs">
-              <span className="eyebrow">Resposta</span>
+              <span className="eyebrow">{t('api.response_label')}</span>
               {res && (
                 <>
                   <span className={cn('font-semibold', statusColor(res.status))}>{res.status} {res.statusText}</span>
@@ -468,7 +469,7 @@ export function ApiPanel({ active }) {
               ) : res ? (
                 <CodeMirror value={res.body || ''} theme={theme === 'dark' ? vscodeDark : vscodeLight} height="100%" style={{ height: '100%' }} editable={false} extensions={[editorTheme, ...langForType(res.contentType)]} />
               ) : (
-                <EmptyState>{loading ? 'Enviando…' : 'Envie uma request para ver a resposta aqui.'}</EmptyState>
+                <EmptyState>{loading ? t('api.response_loading') : t('api.response_empty')}</EmptyState>
               )}
             </div>
           </div>
@@ -480,19 +481,19 @@ export function ApiPanel({ active }) {
       <div style={{ width: sidebarWidth }} className="flex shrink-0 flex-col bg-card">
         <div className="flex h-12 shrink-0 items-center gap-1.5 border-b px-3">
           <History className="size-3.5 text-primary" />
-          <span className="eyebrow flex-1 truncate">Histórico</span>
-          <button type="button" onClick={clearAll} title="Nova chamada" className="grid h-6 w-6 place-items-center rounded text-muted-foreground hover:bg-muted hover:text-foreground [&_svg]:size-[14px]">
+          <span className="eyebrow flex-1 truncate">{t('api.history_label')}</span>
+          <button type="button" onClick={clearAll} title={t('api.history_new_call')} className="grid h-6 w-6 place-items-center rounded text-muted-foreground hover:bg-muted hover:text-foreground [&_svg]:size-[14px]">
             <Plus />
           </button>
           {history.length > 0 && (
-            <button type="button" onClick={clearAllHistory} title="Limpar todo o histórico" className="grid h-6 w-6 place-items-center rounded text-muted-foreground hover:bg-muted hover:text-red-500 [&_svg]:size-[14px]">
+            <button type="button" onClick={clearAllHistory} title={t('api.history_clear_all')} className="grid h-6 w-6 place-items-center rounded text-muted-foreground hover:bg-muted hover:text-red-500 [&_svg]:size-[14px]">
               <Trash2 />
             </button>
           )}
         </div>
         <div className="min-h-0 flex-1 overflow-auto">
           {history.length === 0 ? (
-            <p className="px-2.5 py-2 text-[11px] leading-relaxed text-muted-foreground">Cada chamada que você enviar aparece aqui, com o resultado.</p>
+            <p className="px-2.5 py-2 text-[11px] leading-relaxed text-muted-foreground">{t('api.history_empty')}</p>
           ) : (
             history.map((h) => (
               <div
@@ -507,14 +508,14 @@ export function ApiPanel({ active }) {
                 <div className="flex items-center gap-1.5">
                   <span className={cn('shrink-0 font-mono text-[10px] font-bold', methodColor(h.method))}>{h.method}</span>
                   <span className="flex-1 truncate text-[12px]">{shortUrl(h.fullUrl || h.url)}</span>
-                  <button type="button" onClick={(e) => removeEntry(h.id, e)} title="Excluir" className="grid h-5 w-5 shrink-0 place-items-center rounded text-muted-foreground opacity-0 hover:bg-background hover:text-red-500 group-hover:opacity-100 [&_svg]:size-[13px]">
+                  <button type="button" onClick={(e) => removeEntry(h.id, e)} title={t('api.history_delete')} className="grid h-5 w-5 shrink-0 place-items-center rounded text-muted-foreground opacity-0 hover:bg-background hover:text-red-500 group-hover:opacity-100 [&_svg]:size-[13px]">
                     <Trash2 />
                   </button>
                 </div>
                 <div className="mt-0.5 flex items-center gap-2 text-[10px] text-muted-foreground">
                   {h.ok
                     ? <span className={cn('font-semibold', statusColor(h.status))}>{h.status}</span>
-                    : <span className="font-semibold text-red-500">erro</span>}
+                    : <span className="font-semibold text-red-500">{t('api.history_error')}</span>}
                   <span>{fmtWhen(h.sentAt)}</span>
                 </div>
               </div>

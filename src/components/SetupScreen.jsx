@@ -1,14 +1,15 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Check, Download, RefreshCw, GitBranch, Hexagon, Loader2 } from 'lucide-react';
 import { Button } from './ui/button.jsx';
+import { useT } from '@/lib/i18n';
 
 // Ferramentas externas que o Carcará usa. O app abre sem elas (o Electron traz o próprio
 // runtime) e a gente só guia a instalação — sem instalar nada escondido, sem pedir admin.
 // Nota: o CLI de IA (Claude Code, Codex, OpenCode, Antigravity…) NÃO entra aqui — cada um
 // instala o seu, e nem todo mundo usa o Claude. Aqui ficam só as dependências comuns a todos.
 const LEVELS = {
-  essential: { label: 'Essencial', cls: 'bg-primary/10 text-primary' },
-  recommended: { label: 'Recomendado', cls: 'bg-amber-500/10 text-amber-600 dark:text-amber-400' },
+  essential: { labelKey: 'setup.level_essential', cls: 'bg-primary/10 text-primary' },
+  recommended: { labelKey: 'setup.level_recommended', cls: 'bg-amber-500/10 text-amber-600 dark:text-amber-400' },
 };
 
 export const DEPENDENCIES = [
@@ -17,8 +18,8 @@ export const DEPENDENCIES = [
     name: 'Node.js',
     Icon: Hexagon,
     level: 'essential',
-    desc: 'Faz o Preview funcionar — ver o projeto rodando ao vivo é o coração do Carcará. Sem Node, sem Preview.',
-    note: 'Baixe a versão LTS.',
+    descKey: 'setup.node_desc',
+    noteKey: 'setup.node_note',
     url: 'https://nodejs.org/en/download',
   },
   {
@@ -26,29 +27,30 @@ export const DEPENDENCIES = [
     name: 'Git',
     Icon: GitBranch,
     level: 'recommended',
-    desc: 'Usado pela aba Git (commits, branches, GitHub) e pela ferramenta Bash do Claude. Sem ele, o Claude cai no PowerShell.',
+    descKey: 'setup.git_desc',
     url: 'https://git-scm.com/download/win',
   },
 ];
 
 function StatusPill({ state }) {
+  const t = useT();
   if (state === 'loading') {
     return (
       <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
-        <Loader2 className="size-3.5 animate-spin" /> verificando…
+        <Loader2 className="size-3.5 animate-spin" /> {t('setup.pill_checking')}
       </span>
     );
   }
   if (state === true) {
     return (
       <span className="flex items-center gap-1.5 rounded-full bg-emerald-500/10 px-2.5 py-1 text-xs font-medium text-emerald-600 dark:text-emerald-400">
-        <Check className="size-3.5" /> Instalado
+        <Check className="size-3.5" /> {t('setup.pill_installed')}
       </span>
     );
   }
   return (
     <span className="rounded-full bg-amber-500/10 px-2.5 py-1 text-xs font-medium text-amber-600 dark:text-amber-400">
-      Não encontrado
+      {t('setup.pill_not_found')}
     </span>
   );
 }
@@ -79,34 +81,35 @@ export function useDependencyStatus(active) {
 
 // Lista visual dos cartões de dependência (compartilhada pela tela de preparo e pelas Configurações).
 export function DependencyCards({ status, loading }) {
+  const t = useT();
   const stateOf = (key) => (loading && !status ? 'loading' : status ? !!status[key] : false);
   return (
     <div className="flex flex-col gap-3">
-      {DEPENDENCIES.map((t) => {
-        const st = stateOf(t.key);
+      {DEPENDENCIES.map((dep) => {
+        const st = stateOf(dep.key);
         const installed = st === true;
-        const lvl = LEVELS[t.level];
+        const lvl = LEVELS[dep.level];
         return (
-          <div key={t.key}
+          <div key={dep.key}
             className={'flex items-start gap-3.5 rounded-xl border p-4 transition-colors ' + (installed ? 'border-emerald-500/30 bg-emerald-500/[0.03]' : '')}>
             <span className="mt-0.5 grid size-9 shrink-0 place-items-center rounded-lg bg-muted text-foreground">
-              <t.Icon className="size-[18px]" />
+              <dep.Icon className="size-[18px]" />
             </span>
             <div className="min-w-0 flex-1">
               <div className="flex flex-wrap items-center gap-2">
-                <span className="text-[15px] font-medium">{t.name}</span>
-                <span className={'rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ' + lvl.cls}>{lvl.label}</span>
+                <span className="text-[15px] font-medium">{dep.name}</span>
+                <span className={'rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ' + lvl.cls}>{t(lvl.labelKey)}</span>
                 <StatusPill state={st} />
               </div>
-              <p className="mt-1 text-xs leading-relaxed text-muted-foreground">{t.desc}</p>
-              {t.note && !installed && (
-                <p className="mt-1.5 rounded-md bg-muted/60 px-2 py-1 font-mono text-[11px] leading-relaxed text-foreground/80">{t.note}</p>
+              <p className="mt-1 text-xs leading-relaxed text-muted-foreground">{t(dep.descKey)}</p>
+              {dep.noteKey && !installed && (
+                <p className="mt-1.5 rounded-md bg-muted/60 px-2 py-1 font-mono text-[11px] leading-relaxed text-foreground/80">{t(dep.noteKey)}</p>
               )}
             </div>
             {!installed && (
               <Button size="sm" variant="secondary" className="shrink-0 gap-1.5"
-                onClick={() => window.api.openExternal(t.url)}>
-                <Download className="size-3.5" /> Instalar
+                onClick={() => window.api.openExternal(dep.url)}>
+                <Download className="size-3.5" /> {t('setup.install')}
               </Button>
             )}
           </div>
@@ -117,6 +120,7 @@ export function DependencyCards({ status, loading }) {
 }
 
 export function SetupScreen({ open, onClose }) {
+  const t = useT();
   const { status, loading, check, essentialsReady } = useDependencyStatus(open);
 
   if (!open) return null;
@@ -124,11 +128,10 @@ export function SetupScreen({ open, onClose }) {
   return (
     <div className="fixed inset-0 z-[60] flex flex-col overflow-y-auto bg-background">
       <div className="mx-auto w-full max-w-2xl px-6 py-12">
-        <div className="eyebrow text-primary">Primeiro uso</div>
-        <h1 className="mt-2 text-2xl font-semibold tracking-tight">Vamos preparar seu PC</h1>
+        <div className="eyebrow text-primary">{t('setup.badge')}</div>
+        <h1 className="mt-2 text-2xl font-semibold tracking-tight">{t('setup.title_main')}</h1>
         <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
-          O Carcará abre sozinho, mas ele trabalha em cima de algumas ferramentas que ficam no seu
-          computador. Confira o que já está pronto e instale o que faltar — é uma vez só.
+          {t('setup.description')}
         </p>
 
         <div className="mt-7">
@@ -137,18 +140,16 @@ export function SetupScreen({ open, onClose }) {
 
         <div className="mt-6 flex items-center gap-2">
           <Button variant="outline" size="sm" className="gap-1.5" disabled={loading} onClick={check}>
-            <RefreshCw className={'size-3.5 ' + (loading ? 'animate-spin' : '')} /> Verificar de novo
+            <RefreshCw className={'size-3.5 ' + (loading ? 'animate-spin' : '')} /> {t('setup.check_again')}
           </Button>
           <div className="flex-1" />
           <Button size="sm" onClick={onClose}>
-            {essentialsReady ? 'Tudo pronto — entrar' : 'Continuar mesmo assim'}
+            {essentialsReady ? t('setup.ready_enter') : t('setup.continue_anyway')}
           </Button>
         </div>
 
         <p className="mt-4 text-xs leading-relaxed text-muted-foreground">
-          Pode entrar e instalar o resto quando quiser. Acabou de instalar algo? Clique em
-          “Verificar de novo”. Esta tela não volta mais sozinha — pra checar de novo, vá em
-          Configurações → Dependências (ou Ctrl/Cmd+K → “Preparar meu PC”).
+          {t('setup.footer')}
         </p>
       </div>
     </div>
