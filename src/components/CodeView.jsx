@@ -1186,15 +1186,15 @@ function FileMenu({ menu, clip, actions, selItems, onClose }) {
       {item.root ? (
         // Área em branco: criar na raiz do projeto, ou colar.
         <>
-          <MenuItem icon={FilePlus} label="New File" onClick={run(actions.newFile)} />
-          <MenuItem icon={FolderPlus} label="New Folder" onClick={run(actions.newFolder)} />
+          <MenuItem icon={FilePlus} label="Novo arquivo" onClick={run(actions.newFile)} />
+          <MenuItem icon={FolderPlus} label="Nova pasta" onClick={run(actions.newFolder)} />
           <div className="my-1 border-t" />
           <MenuItem icon={ClipboardPaste} label="Paste" disabled={!clip} onClick={run(actions.paste)} />
         </>
       ) : (
         <>
-          <MenuItem icon={FilePlus} label="New File" onClick={run(actions.newFile)} />
-          <MenuItem icon={FolderPlus} label="New Folder" onClick={run(actions.newFolder)} />
+          <MenuItem icon={FilePlus} label="Novo arquivo" onClick={run(actions.newFile)} />
+          <MenuItem icon={FolderPlus} label="Nova pasta" onClick={run(actions.newFolder)} />
           <div className="my-1 border-t" />
           <MenuItem icon={ExternalLink} label="Reveal in File Explorer" onClick={run(actions.reveal)} />
           <div className="my-1 border-t" />

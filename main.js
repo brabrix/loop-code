@@ -1526,6 +1526,9 @@ ipcMain.handle('git:init', (evt, { projectPath }) =>
 
 ipcMain.handle('git:addRemote', (evt, { projectPath, url }) => gitTry(async () => {
   const git = gitFor(projectPath);
+  // Conectar ao GitHub é a ação natural num projeto novo — não exija "Inicializar Git" antes.
+  // Sem isto, addRemote numa pasta sem .git falha com "fatal: not a git repository".
+  if (!(await git.checkIsRepo())) await git.init();
   try { await git.addRemote('origin', url); }
   catch { await git.remote(['set-url', 'origin', url]); } // origin já existia → atualiza
   return {};

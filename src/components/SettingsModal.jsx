@@ -7,6 +7,7 @@ import { Switch } from './ui/switch.jsx';
 import { Button } from './ui/button.jsx';
 import { useDependencyStatus, DependencyCards } from './SetupScreen.jsx';
 import { cn } from '@/lib/utils';
+import ygorPhoto from '@/assets/ygor/ygor-andrade.jpg';
 
 // CLIs de IA suportados. O 'cmd' é o que é digitado no terminal ao abrir a sessão.
 // 'Icon' = logo da marca (Claude Code/OpenCode reais; Antigravity usa o "G" do Google;
@@ -383,9 +384,11 @@ export function SettingsModal({ open, onClose }) {
             <div className="mx-auto max-w-3xl">
               {/* Cartão do autor */}
               <div className="flex items-start gap-4 rounded-xl border bg-card p-5">
-                <div className="grid size-14 shrink-0 place-items-center rounded-xl bg-primary/10 text-primary">
-                  <Heart className="size-7" />
-                </div>
+                <img
+                  src={ygorPhoto}
+                  alt={AUTHOR.name}
+                  className="size-14 shrink-0 rounded-xl object-cover ring-1 ring-primary/20"
+                />
                 <div className="min-w-0">
                   <div className="text-[15px] font-semibold text-foreground">{AUTHOR.name}</div>
                   <div className="text-xs text-primary">{AUTHOR.role}</div>
