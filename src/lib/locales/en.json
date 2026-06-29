@@ -421,7 +421,11 @@
     "history_empty": "Each call you send appears here, with its result.",
     "history_delete": "Delete",
     "history_error": "error",
-    "toast_success": "Done! Your call is ready ✨"
+    "toast_success": "Done! Your call is ready ✨",
+    "time_now": "just now",
+    "time_min_ago": "{n} min ago",
+    "time_hour_ago": "{n}h ago",
+    "error_unknown": "Unknown error."
   },
   "setup": {
     "level_essential": "Essential",

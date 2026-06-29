@@ -421,7 +421,11 @@
     "history_empty": "Cada chamada que você enviar aparece aqui, com o resultado.",
     "history_delete": "Excluir",
     "history_error": "erro",
-    "toast_success": "Pronto! Sua chamada foi montada ✨"
+    "toast_success": "Pronto! Sua chamada foi montada ✨",
+    "time_now": "agora",
+    "time_min_ago": "há {n} min",
+    "time_hour_ago": "há {n} h",
+    "error_unknown": "Falha desconhecida."
   },
   "setup": {
     "level_essential": "Essencial",

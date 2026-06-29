@@ -81,12 +81,12 @@ function shortUrl(u) {
 }
 
 // Quando foi enviado, em linguagem do dia a dia.
-function fmtWhen(ts) {
+function fmtWhen(ts, t) {
   if (!ts) return '';
   const diff = Date.now() - ts;
-  if (diff < 60_000) return 'agora';
-  if (diff < 3_600_000) return `há ${Math.floor(diff / 60_000)} min`;
-  if (diff < 86_400_000) return `há ${Math.floor(diff / 3_600_000)} h`;
+  if (diff < 60_000) return t('api.time_now');
+  if (diff < 3_600_000) return t('api.time_min_ago', { n: Math.floor(diff / 60_000) });
+  if (diff < 86_400_000) return t('api.time_hour_ago', { n: Math.floor(diff / 3_600_000) });
   try { return new Date(ts).toLocaleDateString(); } catch { return ''; }
 }
 
@@ -245,7 +245,7 @@ export function ApiPanel({ active }) {
     try {
       const r = await window.api.httpSend(buildRequest(), projectPath || undefined);
       if (r.ok) { setRes(r); record(snapshot, r, null); }
-      else { setErr(r.error || 'Falha desconhecida.'); record(snapshot, null, r.error || 'Falha desconhecida.'); }
+      else { setErr(r.error || t('api.error_unknown')); record(snapshot, null, r.error || t('api.error_unknown')); }
     } catch (e) {
       const msg = e?.message || String(e);
       setErr(msg); record(snapshot, null, msg);
@@ -516,7 +516,7 @@ export function ApiPanel({ active }) {
                   {h.ok
                     ? <span className={cn('font-semibold', statusColor(h.status))}>{h.status}</span>
                     : <span className="font-semibold text-red-500">{t('api.history_error')}</span>}
-                  <span>{fmtWhen(h.sentAt)}</span>
+                  <span>{fmtWhen(h.sentAt, t)}</span>
                 </div>
               </div>
             ))
