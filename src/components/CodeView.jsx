@@ -42,11 +42,14 @@ import { EmptyState } from './ui/empty-state.jsx';
 import { useTheme } from '@/lib/theme.jsx';
 import { cn } from '@/lib/utils';
 import { useT } from '@/lib/i18n';
+import { isHtml } from '@/lib/htmlPreview';
 
 // Preview de markdown renderizado (react-markdown + GFM + highlight), sob demanda.
 const Markdown = lazy(() => import('./Markdown.jsx'));
 // Visualizador read-only de planilhas (.xlsx/.xlsm), sob demanda.
 const XlsxViewer = lazy(() => import('./XlsxViewer.jsx'));
+// Visualizador read-only de HTML (webview), sob demanda.
+const HtmlViewer = lazy(() => import('./HtmlViewer.jsx'));
 
 function isMarkdown(name) {
   const e = String(name || '').toLowerCase().split('.').pop();
@@ -204,6 +207,26 @@ export function CodeView({ active, openRequest }) {
     n.has(activeTab.path) ? n.delete(activeTab.path) : n.add(activeTab.path);
     return n;
   });
+
+  // .html abertos em modo PREVIEW (renderizado). Padrão é código; este set marca
+  // quem está em visualização. Por path, pra preservar ao alternar abas.
+  const [htmlPreview, setHtmlPreview] = useState(() => new Set());
+  const htmlShown = activeTab && isHtml(activeTab.name) && htmlPreview.has(activeTab.path);
+  // Entrar em preview salva a aba se estiver suja (o webview lê do disco); sair só volta.
+  const toggleHtmlPreview = async () => {
+    if (!activeTab) return;
+    const path = activeTab.path;
+    if (htmlPreview.has(path)) {
+      setHtmlPreview((s) => { const n = new Set(s); n.delete(path); return n; });
+      return;
+    }
+    if (activeTab.dirty && !activeTab.notice) {
+      const res = await window.api.writeFile(path, activeTab.content);
+      if (res.error) return; // falhou ao salvar: não entra em preview
+      setTabs((cur) => cur.map((x) => (x.path === path ? { ...x, dirty: false } : x)));
+    }
+    setHtmlPreview((s) => { const n = new Set(s); n.add(path); return n; });
+  };
 
   // Menu de contexto da árvore
   const [menu, setMenu] = useState(null);     // { x, y, item }
@@ -787,6 +810,12 @@ export function CodeView({ active, openRequest }) {
                   {mdPreview ? <><Code2 className="size-3.5" />{t('code.md_button_edit')}</> : <><Eye className="size-3.5" />{t('code.md_button_preview')}</>}
                 </Button>
               )}
+              {activeTab && !activeTab.notice && !activeTab.image && !activeTab.pdf && !activeTab.xlsx && isHtml(activeTab.name) && (
+                <Button variant="ghost" size="sm" className="h-7 shrink-0 gap-1.5 text-muted-foreground" onClick={toggleHtmlPreview}
+                  title={htmlShown ? t('code.html_toggle_edit') : t('code.html_toggle_preview')}>
+                  {htmlShown ? <><Code2 className="size-3.5" />{t('code.html_button_edit')}</> : <><Eye className="size-3.5" />{t('code.html_button_preview')}</>}
+                </Button>
+              )}
               {activeTab && !activeTab.notice && !activeTab.image && !activeTab.pdf && !activeTab.xlsx && (
                 <Button variant="secondary" size="sm" className="mr-2 h-7 shrink-0" onClick={save} disabled={!activeTab.dirty} title={t('code.save_tooltip')}>
                   <Save className="mr-1" />{t('code.save_button')}
@@ -808,6 +837,10 @@ export function CodeView({ active, openRequest }) {
             </Suspense>
           ) : activeTab?.notice ? (
             <div className="flex h-full items-center justify-center text-muted-foreground">{activeTab.notice}</div>
+          ) : htmlShown ? (
+            <Suspense fallback={<div className="flex h-full items-center justify-center text-sm text-muted-foreground">{t('code.loading_preview')}</div>}>
+              <HtmlViewer path={activeTab.path} />
+            </Suspense>
           ) : mdPreview ? (
             <div className="absolute inset-0 overflow-y-auto px-8 py-6">
               <div className="mx-auto max-w-3xl">
