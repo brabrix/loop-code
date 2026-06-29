@@ -24,6 +24,7 @@ import { EmptyState } from './ui/empty-state.jsx';
 import { cn } from '@/lib/utils';
 import { ErrorBoundary } from './ErrorBoundary.jsx';
 import { INJECT, CLEANUP, GRAB_SENTINEL, GRAB_CANCEL } from '@/lib/grabScript';
+import { useT } from '@/lib/i18n';
 
 // Faz os botões laterais do mouse (voltar/avançar) funcionarem dentro do preview.
 // O Electron não identifica esses botões no input-event do main (button=undefined),
@@ -75,15 +76,16 @@ function LazyPanel({ label, children }) {
 
 // Menu "Ferramentas" (seta ˅) com as abas menos usadas (API, MCP), pra enxugar a barra.
 function MoreTools({ view, onPick }) {
+  const t = useT();
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
   const TOOLS = [
-    { value: 'history', label: 'Histórico', Icon: ClockIcon },
-    { value: 'api', label: 'API', Icon: ZapIcon },
-    { value: 'mcp', label: 'MCP', Icon: PlugZapIcon },
-    { value: 'board', label: 'Quadro', Icon: PenToolIcon },
+    { value: 'history', label: t('preview.history'), Icon: ClockIcon },
+    { value: 'api', label: t('preview.api'), Icon: ZapIcon },
+    { value: 'mcp', label: t('preview.mcp'), Icon: PlugZapIcon },
+    { value: 'board', label: t('preview.board'), Icon: PenToolIcon },
   ];
-  const active = TOOLS.find((t) => t.value === view);
+  const active = TOOLS.find((tool) => tool.value === view);
 
   useEffect(() => {
     if (!open) return;
@@ -97,7 +99,7 @@ function MoreTools({ view, onPick }) {
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
-        title="Mais ferramentas (Histórico, API, MCP, Quadro)"
+        title={t('preview.more_tools')}
         className={cn(
           'flex h-7 items-center gap-0.5 rounded-md px-1.5 transition-colors [&_svg]:size-[15px]',
           active ? 'text-primary' : 'text-muted-foreground hover:bg-muted hover:text-foreground'
@@ -108,17 +110,17 @@ function MoreTools({ view, onPick }) {
       </button>
       {open && (
         <div className="absolute left-0 top-9 z-50 min-w-[150px] overflow-hidden rounded-md border bg-popover py-1 shadow-md">
-          {TOOLS.map((t) => (
+          {TOOLS.map((tool) => (
             <button
-              key={t.value}
+              key={tool.value}
               type="button"
-              onClick={() => { onPick(t.value); setOpen(false); }}
+              onClick={() => { onPick(tool.value); setOpen(false); }}
               className={cn(
                 'flex w-full items-center gap-2 px-3 py-1.5 text-left text-[13px] hover:bg-muted [&_svg]:size-4',
-                view === t.value && 'font-medium text-primary'
+                view === tool.value && 'font-medium text-primary'
               )}
             >
-              <HoverIcon as={t.Icon} />{t.label}
+              <HoverIcon as={tool.Icon} />{tool.label}
             </button>
           ))}
         </div>
@@ -161,6 +163,7 @@ function partitionFor(projectPath) {
 }
 
 export function PreviewPanel({ active, onProjectsChanged, controlsRef, onModeChange }) {
+  const t = useT();
   const [view, setView] = useState('preview');
   const [openRequest, setOpenRequest] = useState(null); // { path, name, seq } — abrir arquivo na aba Código (paleta)
   const openSeqRef = useRef(0);
@@ -387,7 +390,7 @@ export function PreviewPanel({ active, onProjectsChanged, controlsRef, onModeCha
           setMode('empty'); // parado pelo usuário, ou já tinha aberto e o servidor caiu
         } else {
           setMode('log'); // falhou ao subir: mantém o log à mostra pra ver o erro
-          appendLog(projectPath, '\n> servidor encerrou. Veja o erro acima.\n');
+          appendLog(projectPath, t('preview.log_exited'));
         }
       }
       onProjectsChanged?.();
@@ -466,10 +469,10 @@ export function PreviewPanel({ active, onProjectsChanged, controlsRef, onModeCha
         if (status.running && !status.url) {
           const log = await window.api.previewGetLog(active.path);
           if (log) appendLog(active.path, log);
-          appendLog(active.path, '\n> servidor ja iniciou, procurando a porta...\n');
+          appendLog(active.path, t('preview.log_found'));
           return;
         }
-        appendLog(active.path, '> preparando preview...\n');
+        appendLog(active.path, t('preview.log_preparing'));
         const res = await window.api.startPreview(active.path);
         if (res && res.error) appendLog(active.path, '\n[erro] ' + res.error + '\n');
         onProjectsChanged?.();
@@ -530,7 +533,7 @@ export function PreviewPanel({ active, onProjectsChanged, controlsRef, onModeCha
     setTimeout(async () => {
       try {
         if (logRef.current) logRef.current.textContent = '';
-        appendLog(active.path, '> reiniciando servidor...\n');
+        appendLog(active.path, t('preview.log_restarting'));
         const res = await window.api.startPreview(active.path);
         if (res && res.error) appendLog(active.path, '\n[erro] ' + res.error + '\n');
         onProjectsChanged?.();
@@ -579,14 +582,14 @@ export function PreviewPanel({ active, onProjectsChanged, controlsRef, onModeCha
   const copyClaudePrompt = async () => {
     if (!active) return;
     const prompt = [
-      `O preview do projeto "${active.name}" nao esta subindo no meu app (que roda o script de dev e mostra o resultado num webview).`,
-      ``,
-      `Por favor:`,
-      `1. Confira se o package.json tem um script "dev" (ou "start"/"serve") que sobe um servidor local (Vite, Next, etc).`,
-      `2. Rode esse servidor e veja se ele inicia sem erros; se faltar algum arquivo de config ou dependencia, crie/instale.`,
-      `3. Garanta que ele escuta em http://localhost numa porta acessivel.`,
-      ``,
-      `Me diga o que estava faltando e corrija.`,
+      t('preview.claude_prompt_1', { projectName: active.name }),
+      t('preview.claude_prompt_2'),
+      t('preview.claude_prompt_3'),
+      t('preview.claude_prompt_4'),
+      t('preview.claude_prompt_5'),
+      t('preview.claude_prompt_6'),
+      t('preview.claude_prompt_7'),
+      t('preview.claude_prompt_8'),
     ].join('\n');
     try {
       await navigator.clipboard.writeText(prompt);
@@ -609,9 +612,9 @@ export function PreviewPanel({ active, onProjectsChanged, controlsRef, onModeCha
       <div className="relative z-10 flex h-12 shrink-0 items-center gap-2 border-b bg-card px-2.5">
         <Tabs value={view} onValueChange={setView}>
           <TabsList className="h-8 gap-0.5 p-0.5">
-            <TabsTrigger value="preview" className="h-7 gap-1.5 px-2.5 text-[13px] [&_svg]:size-[15px]"><HoverIcon as={EarthIcon} />Preview</TabsTrigger>
-            <TabsTrigger value="code" className="h-7 gap-1.5 px-2.5 text-[13px] [&_svg]:size-[15px]"><HoverIcon as={ChevronsLeftRightIcon} />Código</TabsTrigger>
-            <TabsTrigger value="git" className="h-7 gap-1.5 px-2.5 text-[13px] [&_svg]:size-[15px]"><HoverIcon as={GitBranchIcon} />Git</TabsTrigger>
+            <TabsTrigger value="preview" className="h-7 gap-1.5 px-2.5 text-[13px] [&_svg]:size-[15px]"><HoverIcon as={EarthIcon} />{t('preview.tab')}</TabsTrigger>
+            <TabsTrigger value="code" className="h-7 gap-1.5 px-2.5 text-[13px] [&_svg]:size-[15px]"><HoverIcon as={ChevronsLeftRightIcon} />{t('preview.code')}</TabsTrigger>
+            <TabsTrigger value="git" className="h-7 gap-1.5 px-2.5 text-[13px] [&_svg]:size-[15px]"><HoverIcon as={GitBranchIcon} />{t('preview.git')}</TabsTrigger>
           </TabsList>
         </Tabs>
 
@@ -622,8 +625,8 @@ export function PreviewPanel({ active, onProjectsChanged, controlsRef, onModeCha
           <>
             {/* Voltar/avançar, estilo navegador. */}
             <div className="flex items-center gap-0.5">
-              <ToolButton onClick={goBack} disabled={!canBack} title="Voltar"><ArrowLeftIcon /></ToolButton>
-              <ToolButton onClick={goFwd} disabled={!canFwd} title="Avançar"><ArrowRightIcon /></ToolButton>
+              <ToolButton onClick={goBack} disabled={!canBack} title={t('preview.back')}><ArrowLeftIcon /></ToolButton>
+              <ToolButton onClick={goFwd} disabled={!canFwd} title={t('preview.forward')}><ArrowRightIcon /></ToolButton>
             </div>
             {/* Barra de URL com o "recarregar" embutido, estilo navegador. */}
             <div className="relative flex-1">
@@ -631,7 +634,7 @@ export function PreviewPanel({ active, onProjectsChanged, controlsRef, onModeCha
                 type="button"
                 onClick={reload}
                 disabled={mode !== 'web'}
-                title="Recarregar página"
+                title={t('preview.reload')}
                 className="absolute left-1 top-1/2 grid h-6 w-6 -translate-y-1/2 place-items-center rounded text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-40 [&_svg]:size-[14px]"
               >
                 <RotateCWIcon />
@@ -641,14 +644,14 @@ export function PreviewPanel({ active, onProjectsChanged, controlsRef, onModeCha
                 onChange={(e) => setUrl(e.target.value)}
                 onKeyDown={onUrlKey}
                 spellCheck={false}
-                placeholder="Preview"
+                placeholder={t('preview.url_placeholder')}
                 className="h-8 pl-8 pr-8 font-mono text-xs"
               />
               <button
                 type="button"
                 onClick={openInBrowser}
                 disabled={mode !== 'web'}
-                title="Abrir no navegador padrão"
+                title={t('preview.open_browser')}
                 className="absolute right-1 top-1/2 grid h-6 w-6 -translate-y-1/2 place-items-center rounded text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-40 [&_svg]:size-[14px]"
               >
                 <ExternalLink />
@@ -656,8 +659,8 @@ export function PreviewPanel({ active, onProjectsChanged, controlsRef, onModeCha
             </div>
 
             <div className="flex items-center gap-0.5">
-              <ToolButton onClick={toggleGrab} disabled={mode !== 'web'} active={grabbing} title="Selecionar elemento (copia pro clipboard)"><Crosshair /></ToolButton>
-              <ToolButton onClick={toggleDevtools} disabled={mode !== 'web'} active={devtoolsOpen} title="DevTools (F12)"><Bug /></ToolButton>
+              <ToolButton onClick={toggleGrab} disabled={mode !== 'web'} active={grabbing} title={t('preview.grab_element')}><Crosshair /></ToolButton>
+              <ToolButton onClick={toggleDevtools} disabled={mode !== 'web'} active={devtoolsOpen} title={t('preview.devtools')}><Bug /></ToolButton>
             </div>
             <div className="h-5 w-px bg-border" />
           </>
@@ -669,7 +672,7 @@ export function PreviewPanel({ active, onProjectsChanged, controlsRef, onModeCha
           onClick={() => setTermOpen((o) => !o)}
           disabled={!active}
           active={termOpen}
-          title={termOpen ? 'Fechar terminal' : 'Abrir terminal'}
+          title={termOpen ? t('preview.close_terminal') : t('preview.open_terminal')}
         >
           <TerminalIcon />
         </ToolButton>
@@ -686,7 +689,7 @@ export function PreviewPanel({ active, onProjectsChanged, controlsRef, onModeCha
           {inPreview && (grabbing || grabbed) && (
             <div className="pointer-events-none absolute inset-x-0 top-3 z-20 flex justify-center">
               <div className={cn('rounded-full border px-3 py-1.5 text-xs font-medium shadow-md', grabbed ? 'border-primary/40 bg-primary text-primary-foreground' : 'bg-popover text-popover-foreground')}>
-                {grabbed ? '✓ Elemento copiado!' : 'Clique num elemento para copiar · Esc cancela'}
+                {grabbed ? t('preview.grab_done') : t('preview.grab_active')}
               </div>
             </div>
           )}
@@ -701,16 +704,16 @@ export function PreviewPanel({ active, onProjectsChanged, controlsRef, onModeCha
               <div className="absolute inset-0">
                 <EmptyState>
                   {active.hasPkg
-                    ? 'O servidor de preview deste projeto não está aberto. Clique em "Reiniciar", no topo, para abri-lo.'
-                    : 'Este projeto não tem um servidor de preview para abrir.'}
+                    ? t('preview.no_preview')
+                    : t('preview.no_preview_server')}
                   <Button variant="secondary" size="sm" onClick={copyClaudePrompt} className="mt-1">
-                    <Copy className="mr-1" />{copied ? 'Copiado!' : 'Não subiu? Copiar prompt pro Claude'}
+                    <Copy className="mr-1" />{copied ? t('preview.prompt_copied') : t('preview.copy_prompt')}
                   </Button>
                 </EmptyState>
               </div>
             ) : (
               <div className="absolute inset-0">
-                <EmptyState size="lg">Selecione um projeto para começar a utilizar.</EmptyState>
+                <EmptyState size="lg">{t('preview.select_project')}</EmptyState>
               </div>
             )
           )}
@@ -742,9 +745,9 @@ export function PreviewPanel({ active, onProjectsChanged, controlsRef, onModeCha
           <DragHandle onMouseDown={startResize} />
           <div className="flex h-8 shrink-0 items-center gap-2 border-b bg-card px-2.5 text-xs text-muted-foreground">
             <Terminal className="h-3.5 w-3.5" />
-            <span className="truncate font-medium">Terminal{active ? ` — ${active.name}` : ''}</span>
+            <span className="truncate font-medium">{active ? t('preview.terminal_label', { projectName: active.name }) : 'Terminal'}</span>
             <div className="flex-1" />
-            <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => setTermOpen(false)} title="Fechar terminal">
+            <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => setTermOpen(false)} title={t('preview.close_terminal')}>
               <X className="h-3.5 w-3.5" />
             </Button>
           </div>

@@ -19,6 +19,7 @@ import { Button } from './ui/button.jsx';
 import { Input } from './ui/input.jsx';
 import { useTheme } from '@/lib/theme.jsx';
 import { toast } from '@/lib/toast.js';
+import { useT } from '@/lib/i18n';
 
 const diffEditorTheme = EditorView.theme({
   '&': { fontSize: '12.5px', height: '100%' },
@@ -26,15 +27,15 @@ const diffEditorTheme = EditorView.theme({
 });
 
 // Letra/cor/descrição do badge de status por código do git (M/A/D/R/U/?).
-function statusBadge(code) {
+function statusBadge(code, t) {
   const map = {
-    M: ['M', 'text-amber-500', 'Modificado'],
-    A: ['A', 'text-emerald-500', 'Adicionado'],
-    D: ['D', 'text-red-500', 'Excluído'],
-    R: ['R', 'text-blue-500', 'Renomeado'],
-    C: ['C', 'text-blue-500', 'Copiado'],
-    U: ['U', 'text-red-500', 'Conflito'],
-    '?': ['U', 'text-emerald-500', 'Novo (não rastreado)'],
+    M: ['M', 'text-amber-500', t('git.status_modified')],
+    A: ['A', 'text-emerald-500', t('git.status_added')],
+    D: ['D', 'text-red-500', t('git.status_deleted')],
+    R: ['R', 'text-blue-500', t('git.status_renamed')],
+    C: ['C', 'text-blue-500', t('git.status_copied')],
+    U: ['U', 'text-red-500', t('git.status_conflict')],
+    '?': ['U', 'text-emerald-500', t('git.status_untracked')],
   };
   return map[code] || [code, 'text-muted-foreground', code];
 }
@@ -44,9 +45,9 @@ function isChanged(f) {
   return (f.working !== ' ' && f.working !== '?') || (f.index === '?' && f.working === '?');
 }
 
-function FileRow({ f, area, onClick, onAct, selected }) {
+function FileRow({ f, area, onClick, onAct, selected, t }) {
   const code = area === 'staged' ? f.index : (f.index === '?' ? '?' : f.working);
-  const [letter, color, label] = statusBadge(code);
+  const [letter, color, label] = statusBadge(code, t);
   const name = f.path.includes(' -> ') ? f.path.split(' -> ').pop() : f.path;
   return (
     <div
@@ -61,7 +62,7 @@ function FileRow({ f, area, onClick, onAct, selected }) {
       <button
         type="button"
         onClick={(e) => { e.stopPropagation(); onAct(); }}
-        title={area === 'staged' ? 'Tirar do stage' : 'Adicionar ao stage'}
+        title={area === 'staged' ? t('git.unstage_file') : t('git.stage_file')}
         className="grid size-5 shrink-0 cursor-pointer place-items-center rounded text-muted-foreground/50 hover:bg-foreground/10 hover:text-foreground [&_svg]:size-3.5"
       >
         {area === 'staged' ? <Minus /> : <Plus />}
@@ -72,6 +73,7 @@ function FileRow({ f, area, onClick, onAct, selected }) {
 }
 
 export function GitPanel({ active, visible }) {
+  const t = useT();
   const { theme } = useTheme();
   const projectPath = active?.path || null;
   const [status, setStatus] = useState(null); // resultado de git:status (ok/erro)
@@ -132,7 +134,7 @@ export function GitPanel({ active, visible }) {
   };
 
   if (!projectPath) {
-    return <div className="absolute inset-0 flex items-center justify-center px-6 text-center text-muted-foreground">Abra um projeto para ver o Git aqui.</div>;
+    return <div className="absolute inset-0 flex items-center justify-center px-6 text-center text-muted-foreground">{t('git.open_project')}</div>;
   }
 
   // Git não instalado na máquina: aviso amigável + botão pra baixar (comum em PC de não-dev).
@@ -140,12 +142,12 @@ export function GitPanel({ active, visible }) {
     return (
       <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 px-8 text-center">
         <GitBranch className="size-8 text-muted-foreground" />
-        <p className="text-sm font-medium text-foreground">O Git não está instalado neste computador.</p>
+        <p className="text-sm font-medium text-foreground">{t('git.not_installed')}</p>
         <p className="max-w-xs text-xs leading-relaxed text-muted-foreground">
-          A aba Git usa o Git do sistema. Instale uma vez, reabra o Carcará e ela passa a funcionar.
+          {t('git.not_installed_help')}
         </p>
         <Button size="sm" onClick={() => window.api.openExternal('https://git-scm.com/download/win')}>
-          Baixar o Git
+          {t('git.download_git')}
         </Button>
       </div>
     );
@@ -153,7 +155,7 @@ export function GitPanel({ active, visible }) {
 
   // Erro geral.
   if (status && status.ok === false) {
-    return <div className="absolute inset-0 flex items-center justify-center px-6 text-center text-sm text-red-500">Erro do Git: {status.error}</div>;
+    return <div className="absolute inset-0 flex items-center justify-center px-6 text-center text-sm text-red-500">{t('git.git_error', { error: status.error })}</div>;
   }
 
   // Projeto ainda não é um repositório git.
@@ -161,18 +163,18 @@ export function GitPanel({ active, visible }) {
     return (
       <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 px-8 text-center">
         <GitBranch className="size-8 text-muted-foreground" />
-        <p className="text-sm text-muted-foreground">Este projeto ainda não é um repositório Git.</p>
+        <p className="text-sm text-muted-foreground">{t('git.not_repository')}</p>
         <Button size="sm" disabled={!!busy} onClick={() => run('init', () => window.api.gitInit(projectPath), 'Repositório criado')}>
-          Inicializar Git
+          {t('git.init_repository')}
         </Button>
         <div className="flex w-full max-w-sm items-center gap-2">
-          <Input value={remoteUrl} onChange={(e) => setRemoteUrl(e.target.value)} placeholder="URL do GitHub (opcional)" className="h-8 text-xs" />
+          <Input value={remoteUrl} onChange={(e) => setRemoteUrl(e.target.value)} placeholder={t('git.remote_url_placeholder')} className="h-8 text-xs" />
           <Button size="sm" variant="secondary" disabled={!remoteUrl || !!busy}
             onClick={() => run('remote', () => window.api.gitAddRemote(projectPath, remoteUrl.trim()), 'Remoto conectado')}>
-            Conectar
+            {t('git.connect')}
           </Button>
         </div>
-        {notice && <div className="w-full max-w-sm text-left"><ErrorCard text={notice.text} onClose={() => setNotice(null)} /></div>}
+        {notice && <div className="w-full max-w-sm text-left"><ErrorCard text={notice.text} onClose={() => setNotice(null)} t={t} /></div>}
       </div>
     );
   }
@@ -209,15 +211,15 @@ export function GitPanel({ active, visible }) {
           </span>
         )}
         <div className="flex-1" />
-        <Button variant="ghost" size="icon" className="size-7" disabled={!!busy} title="Pull"
+        <Button variant="ghost" size="icon" className="size-7" disabled={!!busy} title={t('git.pull')}
           onClick={() => run('pull', () => window.api.gitPull(projectPath), 'Pull concluído')}>
           <ArrowDownIcon className="size-4" />
         </Button>
-        <Button variant="ghost" size="icon" className="size-7" disabled={!!busy} title="Push"
+        <Button variant="ghost" size="icon" className="size-7" disabled={!!busy} title={t('git.push')}
           onClick={() => run('push', () => window.api.gitPush(projectPath), 'Push concluído')}>
           <ArrowUpIcon className="size-4" />
         </Button>
-        <Button variant="ghost" size="icon" className="size-7" disabled={loading || !!busy} title="Atualizar" onClick={refresh}>
+        <Button variant="ghost" size="icon" className="size-7" disabled={loading || !!busy} title={t('git.refresh')} onClick={refresh}>
           <RefreshCCWIcon className={'size-4 ' + (loading ? 'animate-spin' : '')} />
         </Button>
 
@@ -236,10 +238,10 @@ export function GitPanel({ active, visible }) {
                 ))}
               </div>
               <div className="mt-1 flex items-center gap-1 border-t pt-1">
-                <Input value={newBranch} onChange={(e) => setNewBranch(e.target.value)} placeholder="nova branch" className="h-7 text-xs" />
+                <Input value={newBranch} onChange={(e) => setNewBranch(e.target.value)} placeholder={t('git.new_branch')} className="h-7 text-xs" />
                 <Button size="sm" className="h-7" disabled={!newBranch.trim()}
                   onClick={() => { const n = newBranch.trim(); setNewBranch(''); setBranchMenu(null); run('branch', () => window.api.gitCreateBranch(projectPath, n), 'Branch: ' + n); }}>
-                  Criar
+                  {t('git.create_branch')}
                 </Button>
               </div>
             </div>
@@ -252,7 +254,7 @@ export function GitPanel({ active, visible }) {
         <textarea
           value={message}
           onChange={(e) => setMessage(e.target.value)}
-          placeholder={staged.length > 0 ? `Mensagem do commit (${staged.length} em stage)` : `Mensagem do commit (${changes.length} alteração${changes.length === 1 ? '' : 'ões'})`}
+          placeholder={staged.length > 0 ? t('git.commit_message_staged', { count: staged.length }) : t('git.commit_message_changes', { count: changes.length })}
           rows={2}
           className="w-full resize-none rounded-md border bg-background px-2.5 py-1.5 text-[13px] outline-none focus:ring-1 focus:ring-ring"
         />
@@ -265,57 +267,59 @@ export function GitPanel({ active, visible }) {
             }
             return window.api.gitCommit(projectPath, message.trim());
           }, 'Commit feito').then((r) => { if (r && r.ok !== false) setMessage(''); })}>
-          <Check className="size-4" />{commitAll ? 'Commit de tudo' : 'Commit'}
+          <Check className="size-4" />{commitAll ? t('git.commit_all_button') : t('git.commit_button')}
         </Button>
         {/* Push: o "deploy" pro GitHub. Aparece quando há commits locais a enviar. */}
         {needsPush && (
           <Button size="sm" variant="secondary" className="mt-1.5 w-full gap-1.5" disabled={!!busy}
             onClick={() => run('push', () => window.api.gitPush(projectPath), 'Enviado pro GitHub')}>
             <ArrowUp className="size-4" />
-            {!status?.tracking ? 'Publicar branch no GitHub' : `Enviar ${status.ahead} commit${status.ahead > 1 ? 's' : ''} pro GitHub`}
+            {!status?.tracking ? t('git.publish_branch') : t('git.push_commits', { count: status.ahead })}
           </Button>
         )}
-        {notice && <ErrorCard text={notice.text} onClose={() => setNotice(null)} />}
+        {notice && <ErrorCard text={notice.text} onClose={() => setNotice(null)} t={t} />}
       </div>
 
       {/* Listas + diff */}
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         <div className={(selected ? 'h-[45%] shrink-0 ' : 'flex-1 ') + 'overflow-y-auto overflow-x-hidden p-1.5'}>
           {staged.length > 0 && (
-            <Section title="Staged" count={staged.length}
-              action={{ icon: <Minus />, title: 'Tirar tudo do stage',
+            <Section title={t('git.staged')} count={staged.length}
+              action={{ icon: <Minus />, title: t('git.unstage_all'),
                 onClick: () => run('unstage', () => window.api.gitUnstage(projectPath, staged.map((f) => f.path))) }}>
               {staged.map((f) => (
                 <FileRow key={'s' + f.path} f={f} area="staged" selected={selected?.path === f.path && selected?.staged}
                   onClick={() => setSelected({ path: f.path, staged: true, untracked: false })}
-                  onAct={() => run('unstage', () => window.api.gitUnstage(projectPath, [f.path]))} />
+                  onAct={() => run('unstage', () => window.api.gitUnstage(projectPath, [f.path]))}
+                  t={t} />
               ))}
             </Section>
           )}
           {changes.length > 0 && (
-            <Section title="Alterações" count={changes.length}
-              action={{ icon: <Plus />, title: 'Adicionar tudo ao stage',
+            <Section title={t('git.changes')} count={changes.length}
+              action={{ icon: <Plus />, title: t('git.stage_all'),
                 onClick: () => run('stage', () => window.api.gitStage(projectPath, changes.map((f) => f.path))) }}>
               {changes.map((f) => {
                 const untracked = f.index === '?' && f.working === '?';
                 return (
                   <FileRow key={'c' + f.path} f={f} area="changes" selected={selected?.path === f.path && !selected?.staged}
                     onClick={() => setSelected({ path: f.path, staged: false, untracked })}
-                    onAct={() => run('stage', () => window.api.gitStage(projectPath, [f.path]))} />
+                    onAct={() => run('stage', () => window.api.gitStage(projectPath, [f.path]))}
+                    t={t} />
                 );
               })}
             </Section>
           )}
           {staged.length === 0 && changes.length === 0 && (
-            <div className="flex h-full min-h-[120px] items-center justify-center text-sm text-muted-foreground">Nenhuma alteração.</div>
+            <div className="flex h-full min-h-[120px] items-center justify-center text-sm text-muted-foreground">{t('git.no_changes')}</div>
           )}
         </div>
 
         {selected && (
           <div className="flex min-h-0 min-w-0 flex-1 flex-col border-t">
             <div className="flex h-7 shrink-0 items-center justify-between border-b bg-card px-2 text-xs text-muted-foreground">
-              <span className="truncate font-medium">{selected.path}{selected.untracked ? ' (novo)' : ''}</span>
-              <button type="button" onClick={() => setSelected(null)} className="rounded px-1.5 hover:bg-muted">fechar</button>
+              <span className="truncate font-medium">{selected.path}{selected.untracked ? ' ' + t('git.new_file') : ''}</span>
+              <button type="button" onClick={() => setSelected(null)} className="rounded px-1.5 hover:bg-muted">{t('git.close_file')}</button>
             </div>
             <div className="min-h-0 flex-1">
               <CodeMirror
@@ -335,7 +339,7 @@ export function GitPanel({ active, visible }) {
 }
 
 // Card vermelho de erro com botão de copiar (pra mandar pra IA).
-function ErrorCard({ text, onClose }) {
+function ErrorCard({ text, onClose, t }) {
   const [copied, setCopied] = useState(false);
   const copy = async () => {
     try {
@@ -350,18 +354,18 @@ function ErrorCard({ text, onClose }) {
     <div className="mt-1.5 rounded-md border border-red-500/40 bg-red-500/10 text-red-600 dark:text-red-400">
       <div className="flex items-center gap-1.5 px-2 py-1.5">
         <AlertTriangle className="size-3.5 shrink-0" />
-        <span className="flex-1 text-[11px] font-semibold uppercase tracking-wide">Erro no Git</span>
+        <span className="flex-1 text-[11px] font-semibold uppercase tracking-wide">{t('git.error_git')}</span>
         <button
           type="button"
           onClick={copy}
-          title="Copiar erro"
+          title={t('git.copy_error')}
           className="flex h-6 items-center gap-1 rounded px-1.5 text-[11px] font-medium hover:bg-red-500/15"
         >
           {copied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
-          {copied ? 'Copiado' : 'Copiar'}
+          {copied ? t('git.copied') : t('git.copy')}
         </button>
         {onClose && (
-          <button type="button" onClick={onClose} title="Fechar"
+          <button type="button" onClick={onClose} title={t('git.close')}
             className="grid size-6 place-items-center rounded hover:bg-red-500/15 [&_svg]:size-3.5">
             <X />
           </button>
