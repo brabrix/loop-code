@@ -2,6 +2,7 @@ import { createRoot } from 'react-dom/client';
 import App from './App.jsx';
 import { ThemeProvider } from './lib/theme.jsx';
 import { LanguageProvider } from './lib/i18n.jsx';
+import { LayoutProvider } from './lib/layoutContext.jsx';
 import { ErrorBoundary } from './components/ErrorBoundary.jsx';
 import './index.css';
 
@@ -12,9 +13,11 @@ window.addEventListener('error', (e) => {
 createRoot(document.getElementById('root')).render(
   <ThemeProvider>
     <LanguageProvider>
-      <ErrorBoundary label="Carcará Code">
-        <App />
-      </ErrorBoundary>
+      <LayoutProvider>
+        <ErrorBoundary label="Carcará Code">
+          <App />
+        </ErrorBoundary>
+      </LayoutProvider>
     </LanguageProvider>
   </ThemeProvider>
 );
