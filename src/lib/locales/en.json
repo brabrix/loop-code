@@ -468,6 +468,20 @@
     "rows": "rows",
     "truncated": "showing {shownRows}×{shownCols} of {totalRows}×{totalCols}"
   },
+  "update": {
+    "checking": "Checking for updates…",
+    "available": "Version {version} available",
+    "downloading": "Downloading… {percent}%",
+    "ready": "Ready to install",
+    "error": "Update failed",
+    "upToDate": "You're on the latest version",
+    "dev": "Updates unavailable in dev",
+    "downloadBtn": "Download",
+    "installBtn": "Restart now",
+    "retryBtn": "Try again",
+    "dismiss": "Dismiss"
+  },
+  "update_notify_body": "Version {version} available — open to update",
   "settings": {
     "title": "Settings",
     "tabAi": "AI per project",

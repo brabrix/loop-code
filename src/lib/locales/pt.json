@@ -468,6 +468,20 @@
     "rows": "linhas",
     "truncated": "mostrando {shownRows}×{shownCols} de {totalRows}×{totalCols}"
   },
+  "update": {
+    "checking": "Procurando atualizações…",
+    "available": "Versão {version} disponível",
+    "downloading": "Baixando… {percent}%",
+    "ready": "Pronto para instalar",
+    "error": "Falha ao atualizar",
+    "upToDate": "Você está na última versão",
+    "dev": "Atualização indisponível em dev",
+    "downloadBtn": "Baixar",
+    "installBtn": "Reiniciar agora",
+    "retryBtn": "Tentar de novo",
+    "dismiss": "Dispensar"
+  },
+  "update_notify_body": "Versão {version} disponível — abra para atualizar",
   "settings": {
     "title": "Configurações",
     "tabAi": "IA por projeto",
