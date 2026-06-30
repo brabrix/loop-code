@@ -1,5 +1,5 @@
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
-import { Terminal, X, Copy, Bug, Loader2, Crosshair, ExternalLink } from 'lucide-react';
+import { Terminal, X, Copy, Bug, Loader2, Crosshair, ExternalLink, Monitor, Tablet, Smartphone } from 'lucide-react';
 // Ícones animados (lucide-animated): animam no hover. Só os que têm versão no
 // registry; Crosshair/Bug seguem estáticos (não há equivalente animado).
 import { EarthIcon } from './ui/earth.jsx';
@@ -150,6 +150,61 @@ function ToolButton({ active, className, children, ...props }) {
   );
 }
 
+// Seletor de tamanho de tela (computador/tablet/celular). Mostra só o dispositivo
+// atual; ao clicar, abre um dropdown com as três opções — mesmo padrão visual do
+// menu "Ferramentas", pra barra ficar coesa. Fica colado na barra de URL.
+function DevicePicker({ value, onChange, disabled }) {
+  const t = useT();
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+  const DEVICES = [
+    { value: 'desktop', label: t('preview.viewport_desktop'), Icon: Monitor },
+    { value: 'tablet', label: t('preview.viewport_tablet'), Icon: Tablet },
+    { value: 'mobile', label: t('preview.viewport_mobile'), Icon: Smartphone },
+  ];
+  const current = DEVICES.find((d) => d.value === value) || DEVICES[0];
+  const CurrentIcon = current.Icon;
+
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    window.addEventListener('mousedown', onDown);
+    return () => window.removeEventListener('mousedown', onDown);
+  }, [open]);
+
+  return (
+    <div ref={ref} className="relative">
+      <ToolButton
+        onClick={() => setOpen((o) => !o)}
+        disabled={disabled}
+        active={open || value !== 'desktop'}
+        title={t('preview.viewport')}
+        aria-haspopup="menu"
+        aria-expanded={open}
+      >
+        <CurrentIcon />
+      </ToolButton>
+      {open && (
+        <div className="absolute left-0 top-9 z-50 min-w-[150px] overflow-hidden rounded-md border bg-popover py-1 shadow-md">
+          {DEVICES.map((d) => (
+            <button
+              key={d.value}
+              type="button"
+              onClick={() => { onChange(d.value); setOpen(false); }}
+              className={cn(
+                'flex w-full items-center gap-2 px-3 py-1.5 text-left text-[13px] hover:bg-muted [&_svg]:size-4',
+                value === d.value && 'font-medium text-primary'
+              )}
+            >
+              <d.Icon />{d.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // Sessão isolada por projeto. Sem isso, todos os previews dividem a sessão padrão
 // do Electron (mesmo cache, localStorage e SERVICE WORKER). Um SW registrado por
 // um site (ex.: localhost:8080) passa a interceptar e servir aquele site pra
@@ -160,6 +215,30 @@ function partitionFor(projectPath) {
   let h = 0;
   for (let i = 0; i < projectPath.length; i++) h = (h * 31 + projectPath.charCodeAt(i)) | 0;
   return 'persist:preview-' + (h >>> 0).toString(36);
+}
+
+// Larguras dos modos de visualização. `null` = desktop (ocupa tudo). Os demais
+// fixam a largura e centralizam o webview, simulando tablet/celular pra testar
+// o layout responsivo sem precisar redimensionar a janela toda.
+const VIEWPORTS = { desktop: null, tablet: 820, mobile: 390 };
+
+// Aplica o modo de visualização ao <webview>: no desktop ele volta a ocupar a
+// área inteira; nos outros vira uma "moldura" centralizada de largura fixa.
+function applyViewport(w, vp) {
+  const width = VIEWPORTS[vp];
+  if (!width) {
+    w.style.width = '100%';
+    w.style.left = '0';
+    w.style.right = '0';
+    w.style.transform = 'none';
+  } else {
+    // Largura fixa e centralizado. Sem borda/sombra: a calha cinza ao redor já
+    // separa o "dispositivo" do fundo (mesma ideia do Lovable), e o site fica limpo.
+    w.style.width = width + 'px';
+    w.style.left = '50%';
+    w.style.right = 'auto';
+    w.style.transform = 'translateX(-50%)';
+  }
 }
 
 export function PreviewPanel({ active, onProjectsChanged, controlsRef, onModeChange }) {
@@ -181,6 +260,9 @@ export function PreviewPanel({ active, onProjectsChanged, controlsRef, onModeCha
   const [canBack, setCanBack] = useState(false);      // navegação do preview (voltar/avançar)
   const [canFwd, setCanFwd] = useState(false);
   const [webFocused, setWebFocused] = useState(false); // foco está DENTRO do webview do projeto ativo
+  const [viewport, setViewport] = useState(() => localStorage.getItem('previewViewport') || 'desktop'); // desktop | tablet | mobile
+  const viewportRef = useRef(viewport); // leitura síncrona dentro do getWebview (deps [])
+  viewportRef.current = viewport;
   const bodyRowRef = useRef(null);
   const webviewsRef = useRef(new Map()); // path -> webview element (um por projeto)
   const containerRef = useRef(null);
@@ -215,6 +297,7 @@ export function PreviewPanel({ active, onProjectsChanged, controlsRef, onModeCha
     w.style.background = '#fff';
     w.style.display = 'none';
     w._retry = 0;
+    applyViewport(w, viewportRef.current); // respeita o modo escolhido já na criação
     containerRef.current.appendChild(w);
     const syncNav = () => { if (activePathRef.current === projectPath) { try { setCanBack(w.canGoBack()); setCanFwd(w.canGoForward()); } catch {} } };
     w.addEventListener('did-navigate', (e) => { if (e.url && activePathRef.current === projectPath) setUrl(e.url); syncNav(); });
@@ -472,6 +555,13 @@ export function PreviewPanel({ active, onProjectsChanged, controlsRef, onModeCha
     }
   }, [view, mode, active]);
 
+  // Troca o modo de visualização (desktop/tablet/celular): re-aplica em todos os
+  // webviews (os escondidos não atrapalham) e guarda a preferência.
+  useEffect(() => {
+    localStorage.setItem('previewViewport', viewport);
+    for (const w of webviewsRef.current.values()) applyViewport(w, viewport);
+  }, [viewport]);
+
   const pollingRef = useRef(new Set()); // paths com um waitAndShow em curso (evita loops duplicados)
 
   // Troca de projeto: inicia/retoma o preview do projeto ativo.
@@ -680,6 +770,8 @@ export function PreviewPanel({ active, onProjectsChanged, controlsRef, onModeCha
               <ToolButton onClick={goBack} disabled={!canBack} title={t('preview.back')}><ArrowLeftIcon /></ToolButton>
               <ToolButton onClick={goFwd} disabled={!canFwd} title={t('preview.forward')}><ArrowRightIcon /></ToolButton>
             </div>
+            {/* Tamanho de tela (computador/tablet/celular), colado na barra de URL. */}
+            <DevicePicker value={viewport} onChange={setViewport} disabled={mode !== 'web'} />
             {/* Barra de URL com o "recarregar" embutido, estilo navegador. */}
             <div className="relative flex-1">
               <button
@@ -733,7 +825,7 @@ export function PreviewPanel({ active, onProjectsChanged, controlsRef, onModeCha
 
       <div ref={bodyRowRef} className="relative flex min-h-0 min-w-0 flex-1">
         <div className="relative isolate min-h-0 min-w-0 flex-1">
-          <div ref={containerRef} className={cn('absolute inset-0', !inPreview && 'pointer-events-none')} />
+          <div ref={containerRef} className={cn('absolute inset-0', !inPreview && 'pointer-events-none', inPreview && mode === 'web' && viewport !== 'desktop' && 'bg-muted/40')} />
           {/* Borda discreta: foco está dentro do preview → Ctrl +/- zooma o site, não o app. */}
           {inPreview && mode === 'web' && webFocused && (
             <div className="pointer-events-none absolute inset-0 z-10 ring-2 ring-inset ring-primary/40" />
