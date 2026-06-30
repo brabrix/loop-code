@@ -324,9 +324,16 @@ export function PreviewPanel({ active, onProjectsChanged, controlsRef, onModeCha
 
   const showWebFor = useCallback((projectPath, u) => {
     urlsRef.current.set(projectPath, u);
-    const w = getWebview(projectPath);
-    if (w.getAttribute('src') !== u) w.src = u;
+    // A UI troca PRIMEIRO (barra de URL + modo); só DEPOIS mexemos no <webview>.
+    // Criar/navegar o <webview> pode lançar (o timing de attach difere no build
+    // empacotado vs. dev) e isto roda dentro do callback do IPC 'preview:ready' —
+    // que a ErrorBoundary não captura. Antes, uma exceção aqui abortava o callback
+    // e setUrl/setMode nunca rodavam: o preview ficava preso no log com o NOME do
+    // projeto na barra. Atualizando o estado antes, a virada acontece de qualquer jeito.
     if (activePathRef.current === projectPath) { setUrl(u); setMode('web'); }
+    const point = () => { const w = getWebview(projectPath); if (w.getAttribute('src') !== u) w.src = u; };
+    try { point(); }
+    catch { requestAnimationFrame(() => { try { point(); } catch {} }); }
   }, [getWebview]);
 
   // DevTools encaixado (definido antes dos effects que o usam, pra não dar TDZ).
@@ -371,15 +378,22 @@ export function PreviewPanel({ active, onProjectsChanged, controlsRef, onModeCha
     window.addEventListener('mouseup', onUp);
   };
 
-  // Listeners de IPC (uma vez).
+  // Os listeners de IPC são registrados UMA vez (deps []) e chamam sempre os closures
+  // atuais via ref. Antes as deps eram [appendLog, showWebFor, onProjectsChanged]: se
+  // qualquer uma mudasse de identidade, o efeito desmontava e re-registrava os 4
+  // listeners — e um evento ('preview:ready'/'preview:log') chegando nesse intervalo
+  // síncrono se perdia. Com [] não há mais essa janela.
+  const ipcRef = useRef(null);
+  ipcRef.current = { appendLog, showWebFor, onProjectsChanged, t };
   useEffect(() => {
-    window.api.on('preview:phase', ({ projectPath, text }) => appendLog(projectPath, '\n> ' + text + '\n'));
-    window.api.on('preview:log', ({ projectPath, chunk }) => appendLog(projectPath, chunk));
-    window.api.on('preview:ready', ({ projectPath, url: u }) => {
-      showWebFor(projectPath, u);
-      onProjectsChanged?.();
-    });
-    window.api.on('preview:exit', ({ projectPath }) => {
+    const offs = [];
+    offs.push(window.api.on('preview:phase', ({ projectPath, text }) => ipcRef.current.appendLog(projectPath, '\n> ' + text + '\n')));
+    offs.push(window.api.on('preview:log', ({ projectPath, chunk }) => ipcRef.current.appendLog(projectPath, chunk)));
+    offs.push(window.api.on('preview:ready', ({ projectPath, url: u }) => {
+      ipcRef.current.showWebFor(projectPath, u);
+      ipcRef.current.onProjectsChanged?.();
+    }));
+    offs.push(window.api.on('preview:exit', ({ projectPath }) => {
       const hadUrl = urlsRef.current.has(projectPath);
       const wasManual = manualStopRef.current.delete(projectPath); // Set.delete devolve true se existia
       urlsRef.current.delete(projectPath);
@@ -390,12 +404,13 @@ export function PreviewPanel({ active, onProjectsChanged, controlsRef, onModeCha
           setMode('empty'); // parado pelo usuário, ou já tinha aberto e o servidor caiu
         } else {
           setMode('log'); // falhou ao subir: mantém o log à mostra pra ver o erro
-          appendLog(projectPath, t('preview.log_exited'));
+          ipcRef.current.appendLog(projectPath, ipcRef.current.t('preview.log_exited'));
         }
       }
-      onProjectsChanged?.();
-    });
-  }, [appendLog, showWebFor, onProjectsChanged]);
+      ipcRef.current.onProjectsChanged?.();
+    }));
+    return () => { for (const off of offs) off?.(); };
+  }, []);
 
   // Cria o webview que vai HOSPEDAR o DevTools (à direita). Existe sempre (escondido quando fechado).
   useEffect(() => {
@@ -441,43 +456,80 @@ export function PreviewPanel({ active, onProjectsChanged, controlsRef, onModeCha
     if (p) uiByProjectRef.current[p] = { view, termOpen, devtoolsOpen };
   }, [view, termOpen, devtoolsOpen]);
 
-  // Mostra só o webview do projeto ATIVO; esconde todos os outros.
+  // Mostra só o webview do projeto ATIVO; esconde todos os outros. Ao revelar o
+  // ativo, RE-GARANTE o src: se a navegação inicial no showWebFor falhou (timing de
+  // attach no build empacotado), aqui ela é refeita — senão o modo web mostraria um
+  // webview em branco que nunca carrega. É a rede de recuperação do ponto fraco do fix.
   useEffect(() => {
     const ap = active?.path || null;
     for (const [p, w] of webviewsRef.current) {
-      w.style.display = p === ap && view === 'preview' && mode === 'web' ? 'flex' : 'none';
+      const show = p === ap && view === 'preview' && mode === 'web';
+      w.style.display = show ? 'flex' : 'none';
+      if (show) {
+        const u = urlsRef.current.get(p);
+        if (u && w.getAttribute('src') !== u) { try { w.src = u; } catch {} }
+      }
     }
   }, [view, mode, active]);
 
+  const pollingRef = useRef(new Set()); // paths com um waitAndShow em curso (evita loops duplicados)
+
   // Troca de projeto: inicia/retoma o preview do projeto ativo.
   useEffect(() => {
+    let cancelled = false; // efeito desmontou/trocou de projeto: corta o setTimeout e o poller
     activePathRef.current = active?.path || null;
     if (!active) { setMode('empty'); setUrl(''); return; }
     setUrl(urlsRef.current.get(active.path) || active.name);
 
+    // Rede de segurança: vira pro modo web consultando o status até a URL existir,
+    // mesmo que o evento 'preview:ready' não chegue. No build empacotado o push único
+    // do IPC às vezes se perde e o preview ficava parado no log — aqui não depende dele.
+    const waitAndShow = async () => {
+      const path = active.path;
+      if (pollingRef.current.has(path)) return; // já tem um loop pra este projeto
+      pollingRef.current.add(path);
+      try {
+        for (let i = 0; i < 600; i++) { // ~3 min (300ms cada): cobre instalar deps + subir
+          if (cancelled || activePathRef.current !== path) return;
+          if (urlsRef.current.has(path)) return; // o evento já resolveu
+          const st = await window.api.previewStatus(path);
+          if (cancelled || activePathRef.current !== path) return;
+          if (st && st.url) { showWebFor(path, st.url); return; }
+          if (st && !st.running) return; // morreu/parou: o preview:exit trata
+          await new Promise((r) => setTimeout(r, 300));
+        }
+      } finally {
+        pollingRef.current.delete(path);
+      }
+    };
+
     (async () => {
       if (urlsRef.current.has(active.path)) { showWebFor(active.path, urlsRef.current.get(active.path)); return; }
       const status = await window.api.previewStatus(active.path);
-      if (activePathRef.current !== active.path) return; // já trocou de novo
+      if (cancelled || activePathRef.current !== active.path) return; // já trocou/desmontou
       if (status.running && status.url) { showWebFor(active.path, status.url); return; }
       if (!active.hasPkg) { setMode('empty'); return; }
 
       setMode('log');
       setTimeout(async () => {
-        if (activePathRef.current !== active.path) return;
+        if (cancelled || activePathRef.current !== active.path) return;
         if (logRef.current) logRef.current.textContent = '';
         if (status.running && !status.url) {
           const log = await window.api.previewGetLog(active.path);
           if (log) appendLog(active.path, log);
           appendLog(active.path, t('preview.log_found'));
+          waitAndShow();
           return;
         }
         appendLog(active.path, t('preview.log_preparing'));
         const res = await window.api.startPreview(active.path);
-        if (res && res.error) appendLog(active.path, '\n[erro] ' + res.error + '\n');
+        if (cancelled) return;
+        if (res && res.error) { appendLog(active.path, '\n[erro] ' + res.error + '\n'); return; }
         onProjectsChanged?.();
+        waitAndShow();
       }, 0);
     })();
+    return () => { cancelled = true; };
   }, [active, showWebFor, appendLog, onProjectsChanged]);
 
   // Navega o preview do projeto ativo até `v` (garante http://, troca pra aba

@@ -84,6 +84,7 @@ export function GitPanel({ active, visible }) {
   const [busy, setBusy] = useState(null); // texto da operação em curso
   const [notice, setNotice] = useState(null); // só erros { text }; o stderr é longo e copiável → fica inline no ErrorCard
   const [remoteUrl, setRemoteUrl] = useState('');
+  const [publishOpen, setPublishOpen] = useState(false); // form "definir repositório" ao publicar sem remote
   const [branchMenu, setBranchMenu] = useState(null); // { all } quando aberto
   const [newBranch, setNewBranch] = useState('');
 
@@ -271,11 +272,41 @@ export function GitPanel({ active, visible }) {
         </Button>
         {/* Push: o "deploy" pro GitHub. Aparece quando há commits locais a enviar. */}
         {needsPush && (
-          <Button size="sm" variant="secondary" className="mt-1.5 w-full gap-1.5" disabled={!!busy}
-            onClick={() => run('push', () => window.api.gitPush(projectPath), t('git.toast_pushed'))}>
-            <ArrowUp className="size-4" />
-            {!status?.tracking ? t('git.publish_branch') : t('git.push_commits', { count: status.ahead })}
-          </Button>
+          status?.hasRemote === false ? (
+            // Sem 'origin': não dá pra publicar sem saber pra qual repositório. Pede a URL primeiro.
+            <div className="mt-1.5">
+              <Button size="sm" variant="secondary" className="w-full gap-1.5" disabled={!!busy}
+                onClick={() => setPublishOpen((v) => !v)}>
+                <ArrowUp className="size-4" />{t('git.publish_branch')}
+              </Button>
+              {publishOpen && (
+                <div className="mt-1.5 rounded-md border bg-card p-2">
+                  <p className="mb-2 text-[11.5px] leading-relaxed text-muted-foreground">{t('git.publish_help')}</p>
+                  <button type="button"
+                    onClick={() => window.api.openExternal('https://github.com/new')}
+                    className="mb-2 inline-flex items-center gap-1 text-[11.5px] font-medium text-primary hover:underline">
+                    {t('git.create_repo_github')}
+                  </button>
+                  <Input value={remoteUrl} onChange={(e) => setRemoteUrl(e.target.value)}
+                    placeholder={t('git.remote_url_publish_placeholder')} className="h-8 text-xs" />
+                  <Button size="sm" className="mt-1.5 w-full gap-1.5" disabled={!remoteUrl.trim() || !!busy}
+                    onClick={() => run('publish', async () => {
+                      const r1 = await window.api.gitAddRemote(projectPath, remoteUrl.trim());
+                      if (r1 && r1.ok === false) return r1;
+                      return window.api.gitPush(projectPath);
+                    }, t('git.toast_pushed')).then((r) => { if (r && r.ok !== false) { setPublishOpen(false); setRemoteUrl(''); } })}>
+                    <ArrowUp className="size-4" />{t('git.connect_and_publish')}
+                  </Button>
+                </div>
+              )}
+            </div>
+          ) : (
+            <Button size="sm" variant="secondary" className="mt-1.5 w-full gap-1.5" disabled={!!busy}
+              onClick={() => run('push', () => window.api.gitPush(projectPath), t('git.toast_pushed'))}>
+              <ArrowUp className="size-4" />
+              {!status?.tracking ? t('git.publish_branch') : t('git.push_commits', { count: status.ahead })}
+            </Button>
+          )
         )}
         {notice && <ErrorCard text={notice.text} onClose={() => setNotice(null)} t={t} />}
       </div>

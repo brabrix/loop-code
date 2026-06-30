@@ -1349,12 +1349,22 @@ ipcMain.on('shell:resize', (evt, { projectPath, cols, rows }) => {
 // Usa simple-git, que é só um wrapper do git do sistema — então herda o
 // credential manager pra push/pull no GitHub, igual o VS Code faz.
 let _sg = null;
-// Env do git SEM variáveis de editor: o app sempre commita com -m (nunca abre editor),
-// e o simple-git bloqueia operações quando EDITOR/GIT_EDITOR está no ambiente
-// ("Use of GIT_EDITOR is not permitted"). Acontece quando o app herda essas vars.
+// Env do git SEM variáveis perigosas que o simple-git bloqueia (ele recusa a operação
+// inteira quando elas estão no ambiente). Acontece quando o app herda o ambiente de um
+// pai que as define — ex.: lançado de um terminal do Claude Code, que injeta config via
+// GIT_CONFIG_COUNT/KEY/VALUE e podia setar GIT_EDITOR.
+//  - Editores: o app sempre commita com -m (nunca abre editor) → "Use of GIT_EDITOR is not permitted".
+//  - Injeção de config: GIT_CONFIG_COUNT + GIT_CONFIG_KEY_<i>/VALUE_<i> e GIT_CONFIG_PARAMETERS →
+//    "Use of GIT_CONFIG_COUNT is not permitted without enabling allowUnsafeConfigEnvCount".
+// Tirar essas vars é seguro: o app gerencia o próprio git e a config normal do usuário continua valendo.
 function gitEnv(extra) {
   const e = { ...process.env, ...(extra || {}) };
   delete e.EDITOR; delete e.VISUAL; delete e.GIT_EDITOR; delete e.GIT_SEQUENCE_EDITOR;
+  const n = Number(e.GIT_CONFIG_COUNT);
+  if (Number.isFinite(n) && n > 0) {
+    for (let i = 0; i < n; i++) { delete e[`GIT_CONFIG_KEY_${i}`]; delete e[`GIT_CONFIG_VALUE_${i}`]; }
+  }
+  delete e.GIT_CONFIG_COUNT; delete e.GIT_CONFIG_PARAMETERS;
   return e;
 }
 function gitFor(cwd) {
@@ -1521,12 +1531,16 @@ ipcMain.handle('git:status', (evt, { projectPath }) => gitTry(async () => {
   const git = gitFor(projectPath);
   if (!(await git.checkIsRepo())) return { isRepo: false };
   const s = await git.status();
+  // Sem 'origin' não dá pra publicar — o painel usa isto pra pedir a URL antes de tentar o push.
+  let hasRemote = false;
+  try { hasRemote = (await git.getRemotes()).some((r) => r.name === 'origin'); } catch {}
   return {
     isRepo: true,
     branch: s.current,
     tracking: s.tracking,
     ahead: s.ahead,
     behind: s.behind,
+    hasRemote,
     files: s.files.map((f) => ({ path: f.path, index: f.index, working: f.working_dir })),
   };
 }));
