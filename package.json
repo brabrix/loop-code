@@ -1,6 +1,6 @@
 {
   "name": "carcara-code",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "IDE minimalista para o Claude Code — cara de Lovable",
   "main": "main.js",
   "scripts": {
@@ -9,7 +9,8 @@
     "start": "electron .",
     "test": "vitest run",
     "pack:exe": "vite build && electron-builder --win nsis --publish never",
-    "test:i18n": "node scripts/i18n-parity.smoke.cjs"
+    "test:i18n": "node scripts/i18n-parity.smoke.cjs",
+    "test:csv": "node scripts/csv-smoke.cjs"
   },
   "build": {
     "appId": "com.carcara.code",

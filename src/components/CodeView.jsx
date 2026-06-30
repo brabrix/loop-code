@@ -7,7 +7,7 @@ import {
   Save, Copy, X, Search, ChevronRight, ChevronDown,
   Scissors, ClipboardPaste, Link2, Pencil, Trash2, ExternalLink,
   ZoomIn, ZoomOut, Maximize2, Eye, EyeOff, Plus, KeyRound, Code2,
-  FilePlus, FolderPlus,
+  FilePlus, FolderPlus, Sheet,
 } from 'lucide-react';
 import { fileIconUrl, folderIconUrl } from '@/lib/fileIcons';
 import { TransformWrapper, TransformComponent } from 'react-zoom-pan-pinch';
@@ -43,6 +43,7 @@ import { useTheme } from '@/lib/theme.jsx';
 import { cn } from '@/lib/utils';
 import { useT } from '@/lib/i18n';
 import { isHtml } from '@/lib/htmlPreview';
+import { toast } from '@/lib/toast';
 
 // Preview de markdown renderizado (react-markdown + GFM + highlight), sob demanda.
 const Markdown = lazy(() => import('./Markdown.jsx'));
@@ -54,6 +55,11 @@ const HtmlViewer = lazy(() => import('./HtmlViewer.jsx'));
 function isMarkdown(name) {
   const e = String(name || '').toLowerCase().split('.').pop();
   return ['md', 'markdown', 'mdx'].includes(e);
+}
+
+function isCsv(name) {
+  const e = String(name || '').toLowerCase().split('.').pop();
+  return ['csv', 'tsv'].includes(e);
 }
 
 // Visual do editor: fonte maior, mais espaçada.
@@ -226,6 +232,33 @@ export function CodeView({ active, openRequest }) {
       setTabs((cur) => cur.map((x) => (x.path === path ? { ...x, dirty: false } : x)));
     }
     setHtmlPreview((s) => { const n = new Set(s); n.add(path); return n; });
+  };
+
+  // CSV/TSV mostrados como GRADE (planilha read-only) em vez de texto. Por path. CSVs
+  // pequenos abrem como texto editável e este set marca quem virou grade; CSVs grandes
+  // (csvLarge) já abrem na grade e ficam presos nela (texto seria pesado pra editar).
+  const [csvGrid, setCsvGrid] = useState(() => new Set());
+  const csvShown = !!activeTab && (activeTab.csvLarge || (!!activeTab.csv && csvGrid.has(activeTab.path)));
+  // Alterna texto <-> grade num CSV pequeno. Ao entrar na grade, salva edições
+  // pendentes (a grade lê do disco) e busca a meta da planilha no main; o main re-parsea
+  // só se o mtime mudou (cache), então rebuscar é barato. As linhas seguem vindo
+  // paginadas via getXlsxRows.
+  const toggleCsvGrid = async () => {
+    if (!activeTab || activeTab.csvLarge) return;
+    const path = activeTab.path;
+    if (csvGrid.has(path)) {
+      setCsvGrid((s) => { const n = new Set(s); n.delete(path); return n; });
+      return;
+    }
+    if (activeTab.dirty && !activeTab.notice) {
+      const w = await window.api.writeFile(path, activeTab.content);
+      if (w.error) { toast.error(w.error); return; } // falhou ao salvar: não entra na grade
+      setTabs((cur) => cur.map((x) => (x.path === path ? { ...x, dirty: false } : x)));
+    }
+    const r = await window.api.openCsvGrid(path);
+    if (r.error) { toast.error(r.error); return; }
+    setTabs((cur) => cur.map((x) => (x.path === path ? { ...x, csvMeta: r.xlsx } : x)));
+    setCsvGrid((s) => { const n = new Set(s); n.add(path); return n; });
   };
 
   // Menu de contexto da árvore
@@ -535,9 +568,13 @@ export function CodeView({ active, openRequest }) {
     // Já aberto? só ativa a aba existente.
     if (tabs.some((t) => t.path === item.path)) { setActivePath(item.path); return; }
     const r = await window.api.readFile(item.path);
-    const tab = { path: item.path, name: item.name, content: '', image: null, pdf: null, xlsx: null, notice: null, dirty: false };
+    const tab = { path: item.path, name: item.name, content: '', image: null, pdf: null, xlsx: null, csv: false, csvLarge: false, csvMeta: null, notice: null, dirty: false };
     if (r.image) tab.image = r.image;
     else if (r.pdf) tab.pdf = r.pdf;
+    // CSV grande: já vem como grade (read-only). Pequeno: texto editável + flag pra
+    // mostrar o botão "Ver como planilha".
+    else if (r.csvLarge) { tab.csvLarge = true; tab.csvMeta = r.xlsx; }
+    else if (r.csv) { tab.csv = true; tab.content = r.content; }
     else if (r.xlsx) tab.xlsx = r.xlsx;
     else if (r.binary) tab.notice = t('code.binary_notice');
     else if (r.error) tab.notice = t('code.error_notice') + ' ' + r.error;
@@ -816,7 +853,19 @@ export function CodeView({ active, openRequest }) {
                   {htmlShown ? <><Code2 className="size-3.5" />{t('code.html_button_edit')}</> : <><Eye className="size-3.5" />{t('code.html_button_preview')}</>}
                 </Button>
               )}
-              {activeTab && !activeTab.notice && !activeTab.image && !activeTab.pdf && !activeTab.xlsx && (
+              {activeTab && !activeTab.notice && !activeTab.image && !activeTab.pdf && !activeTab.xlsx && isCsv(activeTab.name) && (
+                activeTab.csvLarge ? (
+                  <Button variant="ghost" size="sm" className="h-7 shrink-0 gap-1.5 text-muted-foreground" disabled title={t('code.csv_large_tip')}>
+                    <Sheet className="size-3.5" />{t('code.csv_button_grid')}
+                  </Button>
+                ) : (
+                  <Button variant="ghost" size="sm" className="h-7 shrink-0 gap-1.5 text-muted-foreground" onClick={toggleCsvGrid}
+                    title={csvShown ? t('code.csv_toggle_text') : t('code.csv_toggle_grid')}>
+                    {csvShown ? <><Code2 className="size-3.5" />{t('code.csv_button_text')}</> : <><Sheet className="size-3.5" />{t('code.csv_button_grid')}</>}
+                  </Button>
+                )
+              )}
+              {activeTab && !activeTab.notice && !activeTab.image && !activeTab.pdf && !activeTab.xlsx && !csvShown && (
                 <Button variant="secondary" size="sm" className="mr-2 h-7 shrink-0" onClick={save} disabled={!activeTab.dirty} title={t('code.save_tooltip')}>
                   <Save className="mr-1" />{t('code.save_button')}
                 </Button>
@@ -834,6 +883,10 @@ export function CodeView({ active, openRequest }) {
           ) : activeTab?.xlsx ? (
             <Suspense fallback={<div className="flex h-full items-center justify-center text-sm text-muted-foreground">{t('code.loading_spreadsheet')}</div>}>
               <XlsxViewer data={activeTab.xlsx} name={activeTab.name} />
+            </Suspense>
+          ) : csvShown ? (
+            <Suspense fallback={<div className="flex h-full items-center justify-center text-sm text-muted-foreground">{t('code.loading_spreadsheet')}</div>}>
+              <XlsxViewer data={activeTab.csvMeta} name={activeTab.name} />
             </Suspense>
           ) : activeTab?.notice ? (
             <div className="flex h-full items-center justify-center text-muted-foreground">{activeTab.notice}</div>

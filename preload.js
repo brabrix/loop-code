@@ -148,6 +148,8 @@ contextBridge.exposeInMainWorld('api', {
   readFile: (filePath) => ipcRenderer.invoke('fs:read', { filePath }),
   writeFile: (filePath, content) => ipcRenderer.invoke('fs:write', { filePath, content }),
   getXlsxRows: (filePath, sheet, start, count) => ipcRenderer.invoke('xlsx:rows', { filePath, sheet, start, count }),
+  // Meta da grade de um CSV (sob demanda, quando alterna de texto pra planilha).
+  openCsvGrid: (filePath) => ipcRenderer.invoke('csv:grid', { filePath }),
 
   // Menu de contexto da árvore de arquivos
   revealItem: (targetPath) => ipcRenderer.invoke('fs:reveal', { targetPath }),

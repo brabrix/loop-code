@@ -656,6 +656,10 @@ const IMAGE_EXT = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.avif', '.
 const XLSX_MAX_ROWS = 100000;
 const XLSX_MAX_COLS = 100;
 const XLSX_CHUNK_MAX = 500; // teto de linhas por requisição de página
+// CSV acima disso abre só na grade (read-only, paginada). Editar como texto exigiria
+// segurar o arquivo inteiro na memória do CodeMirror, então abaixo do teto vai pro
+// editor (texto) e acima vai direto pra planilha — que escala via paginação.
+const CSV_TEXT_MAX = 2 * 1024 * 1024;
 
 // Cor do ExcelJS -> CSS. Só trata ARGB direto (FFRRGGBB); theme/indexed caem pro null
 // (herdam o tema do app), o que é suficiente pra um preview.
@@ -836,6 +840,17 @@ function parseXlsLegacy(filePath, mtimeMs) {
   return { mtimeMs, kind: 'xls', wb, sheets: wb.SheetNames.map((nm) => buildXlsSheetMeta(wb.Sheets[nm], nm)) };
 }
 
+// CSV/TSV: reaproveita o mesmo modelo "só valores" do .xls; as linhas são fatiadas sob
+// demanda pelo mesmo sliceXlsRows. O parse (encoding + SheetJS raw) mora no csv-core,
+// compartilhado com o smoke (scripts/csv-smoke.cjs).
+function parseCsv(filePath, mtimeMs) {
+  const { parseCsvBuffer } = require('./csv-core.cjs');
+  const wb = parseCsvBuffer(fs.readFileSync(filePath));
+  const name = wb.SheetNames[0];
+  const ws = name ? wb.Sheets[name] : null;
+  return { mtimeMs, kind: 'csv', wb, sheets: [buildXlsSheetMeta(ws, name || 'CSV')] };
+}
+
 async function parseXlsxModern(filePath, mtimeMs) {
   const ExcelJS = require('exceljs');
   const wb = new ExcelJS.Workbook();
@@ -852,7 +867,9 @@ async function openSpreadsheet(filePath) {
     return hit;
   }
   const ext = path.extname(filePath).toLowerCase();
-  const entry = ext === '.xls' ? parseXlsLegacy(filePath, st.mtimeMs) : await parseXlsxModern(filePath, st.mtimeMs);
+  const entry = ext === '.xls' ? parseXlsLegacy(filePath, st.mtimeMs)
+    : (ext === '.csv' || ext === '.tsv') ? parseCsv(filePath, st.mtimeMs)
+    : await parseXlsxModern(filePath, st.mtimeMs);
   xlsxCache.set(filePath, entry);
   while (xlsxCache.size > XLSX_CACHE_MAX) xlsxCache.delete(xlsxCache.keys().next().value);
   return entry;
@@ -862,7 +879,7 @@ async function openSpreadsheet(filePath) {
 function sliceRows(entry, idx, start, count) {
   const meta = entry.sheets[idx];
   if (!meta) return [];
-  if (entry.kind === 'xls') {
+  if (entry.kind === 'xls' || entry.kind === 'csv') {
     const ws = entry.wb.Sheets[entry.wb.SheetNames[idx]];
     return ws ? sliceXlsRows(ws, meta, start, count) : [];
   }
@@ -912,6 +929,19 @@ ipcMain.handle('fs:read', async (evt, { filePath }) => {
       return { xlsx: xlsxMetaForRenderer(entry, filePath) };
     } catch (err) { return { error: 'Não foi possível ler a planilha: ' + ((err && err.message) || String(err)) }; }
   }
+  // CSV/TSV: pequenos abrem como texto editável (CodeMirror) com botão pra virar grade;
+  // grandes (acima do teto, pesados pra editar como texto) abrem direto na grade
+  // read-only, paginada. Ambos parseados sob demanda e cacheados como planilha.
+  if (ext === '.csv' || ext === '.tsv') {
+    try {
+      const st = fs.statSync(filePath);
+      if (st.size > CSV_TEXT_MAX) {
+        const entry = await openSpreadsheet(filePath);
+        return { xlsx: xlsxMetaForRenderer(entry, filePath), csvLarge: true };
+      }
+      return { content: fs.readFileSync(filePath, 'utf8'), csv: true };
+    } catch (err) { return { error: 'Não foi possível ler o CSV: ' + ((err && err.message) || String(err)) }; }
+  }
   if (BINARY_EXT.has(ext)) return { binary: true };
   try {
     const st = fs.statSync(filePath);
@@ -930,6 +960,15 @@ ipcMain.handle('xlsx:rows', async (evt, { filePath, sheet, start, count }) => {
     const s = Math.max(1, Number(start) || 1);
     return { rows: sliceRows(entry, idx, s, n) };
   } catch (err) { return { error: String(err) }; }
+});
+
+// Meta da grade de um CSV sob demanda: usado quando o usuário clica "Ver como
+// planilha" num CSV que abriu como texto. As linhas seguem vindo do 'xlsx:rows'.
+ipcMain.handle('csv:grid', async (evt, { filePath }) => {
+  try {
+    const entry = await openSpreadsheet(filePath);
+    return { xlsx: xlsxMetaForRenderer(entry, filePath) };
+  } catch (err) { return { error: 'Não foi possível ler o CSV: ' + ((err && err.message) || String(err)) }; }
 });
 
 ipcMain.handle('fs:write', (evt, { filePath, content }) => {
