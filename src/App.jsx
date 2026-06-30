@@ -22,16 +22,11 @@ import { colorFor, initials } from './lib/projectColor';
 import { useT } from './lib/i18n';
 import { useLayout } from './lib/layoutContext.jsx';
 import { resolveLayout } from './lib/layout.js';
-import { ZONE_STYLE } from './lib/dropZones.js';
 
 export default function App() {
   const t = useT();
   const { toggle: toggleTheme } = useTheme();
-  const { railSide, claudeSide, setRailSide } = useLayout();
-  // Override de layout do projeto ATIVO (só o lado do Claude). Cache local primeiro
-  // (sem piscar), depois confirma com o main. Chave por caminho.
-  const PKEY = (p) => `projectLayout:v1:${p}`;
-  const [projectOverride, setProjectOverride] = useState(null);
+  const { railSide, claudeSide, setRailSide, setClaudeSideGlobal } = useLayout();
   const [projects, setProjects] = useState([]);
   const [active, setActive] = useState(null);
   const [paletteOpen, setPaletteOpen] = useState(false);
@@ -112,33 +107,9 @@ export default function App() {
   useEffect(() => { activeRef.current = active; }, [active]);
   useEffect(() => { projectsRef.current = projects; }, [projects]);
 
-  // Carrega o override de layout do projeto ativo ao trocar de projeto.
-  useEffect(() => {
-    if (!active) { setProjectOverride(null); return; }
-    try { const s = localStorage.getItem(PKEY(active.path)); setProjectOverride(s ? JSON.parse(s) : null); }
-    catch { setProjectOverride(null); }
-    let alive = true;
-    window.api.getProjectLayout?.(active.path).then((o) => {
-      if (!alive) return;
-      setProjectOverride(o || null);
-      try {
-        if (o) localStorage.setItem(PKEY(active.path), JSON.stringify(o));
-        else localStorage.removeItem(PKEY(active.path));
-      } catch {}
-    }).catch(() => {});
-    return () => { alive = false; };
-  }, [active]);
-
-  // Grava o lado do Claude SÓ pro projeto ativo (usado pelo drag do painel na Task 6).
-  const setClaudeSideForProject = (side) => {
-    if (!active) return;
-    const o = { claudeSide: side === 'right' ? 'right' : 'left' };
-    setProjectOverride(o);
-    try { localStorage.setItem(PKEY(active.path), JSON.stringify(o)); } catch {}
-    window.api.setProjectLayout?.(active.path, o.claudeSide);
-  };
-
-  const eff = resolveLayout({ railSide, claudeSide }, projectOverride);
+  // Lado do Claude e do rail são GLOBAIS (valem pra todos os projetos). Arrastar o
+  // painel ou o rail muda o padrão de todos — não há mais override por projeto.
+  const eff = resolveLayout({ railSide, claudeSide }, null);
   const claudeLeft = eff.claudeSide === 'left';
   const railFirst = eff.railSide === 'left';
   // Posição da "bolinha" de reabrir o chat: colada na borda EXTERNA do chat.
@@ -169,8 +140,18 @@ export default function App() {
       window.removeEventListener('mousemove', onMove);
       window.removeEventListener('mouseup', onUp);
       document.body.style.cursor = '';
-      if (mode === 'panel') setClaudeSideForProject(zone);
-      else if (mode === 'rail') setRailSide(zone);
+      if (mode === 'panel') {
+        // Preserva a largura atual do painel ao trocar de lado: captura antes do swap
+        // e reaplica no frame seguinte (a key estável já mantém a identidade do painel;
+        // isto é garantia caso a lib reinicie no defaultSize ao reordenar).
+        const size = chatPanelRef.current?.getSize?.();
+        setClaudeSideGlobal(zone);
+        if (typeof size === 'number') {
+          requestAnimationFrame(() => { try { chatPanelRef.current?.resize?.(size); } catch {} });
+        }
+      } else if (mode === 'rail') {
+        setRailSide(zone);
+      }
       setDragMode(null);
       setDragZone(null);
     };
@@ -350,6 +331,29 @@ export default function App() {
     reload();
   };
 
+  // Realce de onde vai encostar: uma FAIXA do tamanho real do que está sendo movido
+  // (largura do rail pro rail; ~largura do painel do Claude pro painel), no lado-alvo —
+  // não a metade inteira da tela. O painel encosta depois do rail, se o rail estiver
+  // desse mesmo lado, então a faixa é deslocada por railWidth nesse caso.
+  let dropStyle = null;
+  if (dragMode && dragZone) {
+    if (dragMode === 'rail') {
+      dropStyle = dragZone === 'left'
+        ? { left: 0, top: 0, bottom: 0, width: railWidth }
+        : { right: 0, top: 0, bottom: 0, width: railWidth };
+    } else {
+      // Largura REAL do painel do Claude agora (respeita o resize do usuário): a API do
+      // react-resizable-panels dá o tamanho em % do grupo; o grupo ocupa a janela menos
+      // o rail. Cai pra 34% se o ref ainda não existir.
+      const pct = chatPanelRef.current?.getSize?.() || 34;
+      const band = Math.round((pct / 100) * (window.innerWidth - railWidth));
+      const railOnLeft = eff.railSide === 'left';
+      dropStyle = dragZone === 'left'
+        ? { left: railOnLeft ? railWidth : 0, top: 0, bottom: 0, width: band }
+        : { right: railOnLeft ? 0 : railWidth, top: 0, bottom: 0, width: band };
+    }
+  }
+
   const railEl = (
     <Rail
       projects={projects}
@@ -371,6 +375,7 @@ export default function App() {
 
   const chatPanel = (
     <ResizablePanel
+      key="chat"
       ref={chatPanelRef}
       id="chat"
       order={claudeLeft ? 1 : 2}
@@ -428,7 +433,7 @@ export default function App() {
   );
 
   const handleEl = (
-    <ResizableHandle withHandle>
+    <ResizableHandle key="handle" withHandle>
       {!chatCollapsed && (
         <button
           type="button"
@@ -444,7 +449,7 @@ export default function App() {
   );
 
   const previewPanel = (
-    <ResizablePanel id="preview" order={claudeLeft ? 2 : 1} minSize={28} className="flex flex-col">
+    <ResizablePanel key="preview" id="preview" order={claudeLeft ? 2 : 1} minSize={28} className="flex flex-col">
       <ErrorBoundary label="Preview">
         <PreviewPanel active={active} onProjectsChanged={reload} controlsRef={previewControls} onModeChange={setServerMode} />
       </ErrorBoundary>
@@ -506,10 +511,10 @@ export default function App() {
           mousemove continuar caindo na host, e mostra o realce da metade onde vai cair. */}
       {dragMode && (
         <div className="fixed inset-0 z-50 cursor-grabbing">
-          {dragZone && (
+          {dropStyle && (
             <div
-              className="pointer-events-none absolute rounded-sm border-2 border-primary bg-primary/20 transition-all duration-100"
-              style={ZONE_STYLE[dragZone]}
+              className="pointer-events-none absolute border-2 border-primary bg-primary/15 transition-all duration-75"
+              style={dropStyle}
             />
           )}
         </div>
