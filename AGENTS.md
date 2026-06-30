@@ -102,6 +102,44 @@ a cada mensagem do usuário. O script verifica se já há um commit feito **hoje
   commit com mensagem descritiva e `git push` para o `origin` — e só então atender ao
   pedido do usuário normalmente.
 
+## Notas de versão (release notes) — obrigatório a cada nova versão
+
+Toda vez que for **lançar uma nova versão** (bump de `version` no `package.json` e tag
+`v*`, que dispara o build e publica no GitHub Releases), é **obrigatório** documentar o
+que mudou, no estilo do **n8n**: duas seções, **Features** (novas funcionalidades) e
+**Bug Fixes** (correções). Versão sem notas é uma entrega incompleta.
+
+### Onde escrever
+
+- **`CHANGELOG.md`** na raiz (crie se ainda não existir): uma seção por versão, da mais
+  nova para a mais antiga.
+- O **mesmo conteúdo** vai na descrição do **GitHub Release** daquela tag.
+
+### Formato (siga este modelo)
+
+```markdown
+## [0.2.0] — 2026-07-01
+
+### Features
+- Aba CSV: importar e validar arquivos via `csv-core.cjs` (#NN) (hash)
+
+### Bug Fixes
+- Corrige paridade de i18n que faltava chave em EN (#NN) (hash)
+```
+
+Regras:
+- Use **versionamento semântico** (`MAJOR.MINOR.PATCH`) e a **data** no cabeçalho.
+- Cada item: descrição curta no imperativo + (quando houver) número da issue/PR e o
+  **hash curto** do commit, como o n8n faz.
+- Só **Features** e/ou **Bug Fixes**; se uma seção ficar vazia, omita-a.
+- Escreva em **PT-BR** (este projeto é PT-BR primeiro), mantendo o jargão consagrado.
+
+### Como montar a lista
+
+Antes do release, gere a base a partir do git e edite à mão para ficar legível:
+`git log <ultima-tag>..HEAD --oneline`. Classifique cada commit em Feature ou Bug Fix
+(commits de `chore`/`build`/`docs` normalmente ficam de fora das notas ao usuário).
+
 ## Em resumo
 
 Quando você (Claude Code) for atuar neste repositório, lembre-se: o foco é **manter as
