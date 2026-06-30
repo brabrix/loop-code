@@ -7,7 +7,7 @@ import {
   Save, Copy, X, Search, ChevronRight, ChevronDown,
   Scissors, ClipboardPaste, Link2, Pencil, Trash2, ExternalLink,
   ZoomIn, ZoomOut, Maximize2, Eye, EyeOff, Plus, KeyRound, Code2,
-  FilePlus, FolderPlus, Sheet,
+  FilePlus, FolderPlus, Sheet, Music,
 } from 'lucide-react';
 import { fileIconUrl, folderIconUrl } from '@/lib/fileIcons';
 import { TransformWrapper, TransformComponent } from 'react-zoom-pan-pinch';
@@ -568,9 +568,12 @@ export function CodeView({ active, openRequest }) {
     // Já aberto? só ativa a aba existente.
     if (tabs.some((t) => t.path === item.path)) { setActivePath(item.path); return; }
     const r = await window.api.readFile(item.path);
-    const tab = { path: item.path, name: item.name, content: '', image: null, pdf: null, xlsx: null, csv: false, csvLarge: false, csvMeta: null, notice: null, dirty: false };
+    const tab = { path: item.path, name: item.name, content: '', image: null, pdf: null, xlsx: null, video: null, audio: null, csv: false, csvLarge: false, csvMeta: null, notice: null, dirty: false };
     if (r.image) tab.image = r.image;
     else if (r.pdf) tab.pdf = r.pdf;
+    else if (r.video) tab.video = r.video;
+    else if (r.audio) tab.audio = r.audio;
+    else if (r.unsupportedMedia) tab.notice = t('code.media_unsupported');
     // CSV grande: já vem como grade (read-only). Pequeno: texto editável + flag pra
     // mostrar o botão "Ver como planilha".
     else if (r.csvLarge) { tab.csvLarge = true; tab.csvMeta = r.xlsx; }
@@ -865,7 +868,7 @@ export function CodeView({ active, openRequest }) {
                   </Button>
                 )
               )}
-              {activeTab && !activeTab.notice && !activeTab.image && !activeTab.pdf && !activeTab.xlsx && !csvShown && (
+              {activeTab && !activeTab.notice && !activeTab.image && !activeTab.pdf && !activeTab.xlsx && !activeTab.video && !activeTab.audio && !csvShown && (
                 <Button variant="secondary" size="sm" className="mr-2 h-7 shrink-0" onClick={save} disabled={!activeTab.dirty} title={t('code.save_tooltip')}>
                   <Save className="mr-1" />{t('code.save_button')}
                 </Button>
@@ -880,6 +883,10 @@ export function CodeView({ active, openRequest }) {
             <ImageViewer src={activeTab.image} name={activeTab.name} />
           ) : activeTab?.pdf ? (
             <PdfViewer src={activeTab.pdf} name={activeTab.name} />
+          ) : activeTab?.video ? (
+            <VideoViewer src={activeTab.video} name={activeTab.name} />
+          ) : activeTab?.audio ? (
+            <AudioViewer src={activeTab.audio} name={activeTab.name} />
           ) : activeTab?.xlsx ? (
             <Suspense fallback={<div className="flex h-full items-center justify-center text-sm text-muted-foreground">{t('code.loading_spreadsheet')}</div>}>
               <XlsxViewer data={activeTab.xlsx} name={activeTab.name} />
@@ -1120,6 +1127,60 @@ function PdfViewer({ src, name }) {
       title={name}
       className="absolute inset-0 h-full w-full border-0 bg-card"
     />
+  );
+}
+
+// Visualizador de vídeo: player nativo do Chromium (timeline/seek, volume, velocidade,
+// tela cheia, picture-in-picture). A fonte é uma URL ygc-media:// com streaming + Range.
+function VideoViewer({ src, name }) {
+  const [failed, setFailed] = useState(false);
+  if (failed) return <MediaFallback name={name} />;
+  return (
+    <div className="absolute inset-0 flex flex-col bg-card">
+      <div className="flex h-8 shrink-0 items-center gap-1 border-b px-2 text-xs text-muted-foreground">
+        <span className="truncate">{name}</span>
+      </div>
+      <div className="relative min-h-0 flex-1 bg-black">
+        <video
+          src={src}
+          controls
+          onError={() => setFailed(true)}
+          className="absolute inset-0 h-full w-full object-contain"
+        />
+      </div>
+    </div>
+  );
+}
+
+// Visualizador de áudio: card central com nome + ícone e o player nativo do Chromium.
+function AudioViewer({ src, name }) {
+  const [failed, setFailed] = useState(false);
+  if (failed) return <MediaFallback name={name} />;
+  return (
+    <div className="absolute inset-0 flex flex-col bg-card">
+      <div className="flex h-8 shrink-0 items-center gap-1 border-b px-2 text-xs text-muted-foreground">
+        <span className="truncate">{name}</span>
+      </div>
+      <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-4 p-6">
+        <div className="flex flex-col items-center gap-2 text-muted-foreground">
+          <Music className="size-12 opacity-70" />
+          <span className="max-w-xs truncate text-sm">{name}</span>
+        </div>
+        <audio src={src} controls onError={() => setFailed(true)} className="w-full max-w-md" />
+      </div>
+    </div>
+  );
+}
+
+// Card de fallback: codec não decodificável (onError) ou arquivo de mídia sem suporte.
+function MediaFallback({ name }) {
+  const t = useT();
+  return (
+    <div className="flex h-full flex-col items-center justify-center gap-2 p-6 text-center text-muted-foreground">
+      <Music className="size-10 opacity-60" />
+      <span className="text-sm">{t('code.media_unsupported')}</span>
+      <span className="max-w-xs truncate text-xs opacity-70">{name}</span>
+    </div>
   );
 }
 

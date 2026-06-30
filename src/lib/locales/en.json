@@ -168,6 +168,7 @@
     "loading_preview": "Loading preview…",
     "empty": "Select a file from the tree.",
     "binary_notice": "Binary file — not editable.",
+    "media_unsupported": "Media format not supported by the built-in player.",
     "error_notice": "Error:"
   },
   "env": {
