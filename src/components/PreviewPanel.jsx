@@ -1,5 +1,5 @@
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
-import { Terminal, X, Copy, Bug, Loader2, Crosshair, ExternalLink, Monitor, Tablet, Smartphone } from 'lucide-react';
+import { Terminal, X, Copy, Bug, Loader2, Crosshair, ExternalLink, Monitor, Tablet, Smartphone, Plus, Globe } from 'lucide-react';
 // Ícones animados (lucide-animated): animam no hover. Só os que têm versão no
 // registry; Crosshair/Bug seguem estáticos (não há equivalente animado).
 import { EarthIcon } from './ui/earth.jsx';
@@ -125,6 +125,51 @@ function MoreTools({ view, onPick }) {
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+// Rótulo curto de uma aba: título da página → senão o caminho da URL → senão host.
+function tabLabel(tab, fallback) {
+  if (tab.title) return tab.title;
+  const raw = tab.url || tab.src || '';
+  try {
+    const u = new URL(raw);
+    return u.pathname && u.pathname !== '/' ? u.pathname : u.host;
+  } catch { return raw || fallback; }
+}
+
+// Uma "aba" no estilo VS Code / Claude Code: encostada na vizinha, com uma listrinha
+// da cor da brasa em cima da ATIVA e o fundo dela igual ao do conteúdo (pra "saltar").
+// Clique = ativa; botão do meio ou ✕ = fecha.
+function TabChip({ label, active, onSelect, onClose, closeTitle }) {
+  return (
+    <div
+      onClick={onSelect}
+      onAuxClick={(e) => { if (e.button === 1) { e.preventDefault(); onClose(); } }}
+      title={label}
+      className={cn(
+        'group relative flex h-9 min-w-0 max-w-[210px] shrink-0 cursor-default select-none items-center gap-1.5 border-r border-border/60 pl-3 pr-1.5 text-[12.5px] transition-colors',
+        active
+          ? 'bg-background text-foreground'
+          : 'bg-card text-muted-foreground hover:bg-muted/60 hover:text-foreground'
+      )}
+    >
+      {/* Listrinha em cima = qual aba está selecionada (só na ativa). */}
+      {active && <span className="absolute inset-x-0 top-0 h-0.5 bg-primary" />}
+      <Globe className={cn('size-3.5 shrink-0', active ? 'text-primary' : 'opacity-50')} />
+      <span className={cn('min-w-0 flex-1 truncate', active && 'font-medium')}>{label}</span>
+      <button
+        type="button"
+        onClick={(e) => { e.stopPropagation(); onClose(); }}
+        title={closeTitle}
+        className={cn(
+          'grid size-5 shrink-0 place-items-center rounded transition-opacity hover:bg-accent [&_svg]:size-3.5',
+          active ? 'opacity-70 hover:opacity-100' : 'opacity-0 group-hover:opacity-70 hover:opacity-100'
+        )}
+      >
+        <X />
+      </button>
     </div>
   );
 }
@@ -261,7 +306,7 @@ export function PreviewPanel({ active, onProjectsChanged, controlsRef, onModeCha
   const [canFwd, setCanFwd] = useState(false);
   const [webFocused, setWebFocused] = useState(false); // foco está DENTRO do webview do projeto ativo
   const [viewport, setViewport] = useState(() => localStorage.getItem('previewViewport') || 'desktop'); // desktop | tablet | mobile
-  const viewportRef = useRef(viewport); // leitura síncrona dentro do getWebview (deps [])
+  const viewportRef = useRef(viewport); // leitura síncrona dentro do createTab (deps [])
   viewportRef.current = viewport;
   const bodyRowRef = useRef(null);
   // Abas por projeto. Cada projeto tem uma lista de abas (cada uma com o seu
@@ -488,7 +533,7 @@ export function PreviewPanel({ active, onProjectsChanged, controlsRef, onModeCha
 
   const toggleDevtools = useCallback(() => {
     if (!active) return;
-    const pv = webviewsRef.current.get(active.path);
+    const pv = activeWebviewOf(active.path);
     if (devtoolsOpen) {
       if (pv) { try { window.api.undockDevTools(pv.getWebContentsId()); } catch {} }
       setDevtoolsOpen(false);
@@ -569,10 +614,10 @@ export function PreviewPanel({ active, onProjectsChanged, controlsRef, onModeCha
     window.api.on('devtools:toggle', () => toggleDevtoolsRef.current());
   }, []);
 
-  // Se trocar de projeto com o DevTools aberto, re-encaixa no preview do novo projeto.
+  // Se trocar de projeto OU de aba com o DevTools aberto, re-encaixa no webview atual.
   useEffect(() => {
     if (devtoolsOpen) requestAnimationFrame(dockDevtools);
-  }, [active, devtoolsOpen, dockDevtools]);
+  }, [active, devtoolsOpen, dockDevtools, tabBar.activeId]);
 
   // ---- Estado de UI por projeto (aba ativa, terminal, DevTools) ----
   // Cada projeto lembra em que aba estava (Preview/Código/Git) e se tinha o
@@ -607,13 +652,18 @@ export function PreviewPanel({ active, onProjectsChanged, controlsRef, onModeCha
       for (const tab of proj.tabs) {
         const show = p === ap && proj.activeId === tab.id && view === 'preview' && mode === 'web';
         tab.webview.style.display = show ? 'flex' : 'none';
-        // Recuperação: se a navegação inicial falhou (timing de attach no build
-        // empacotado), re-aponta pro alvo que quisemos (src), não pra URL viva —
-        // senão uma navegação client-side viraria reload em loop.
-        if (show && tab.src && tab.webview.getAttribute('src') !== tab.src) { try { tab.webview.src = tab.src; } catch {} }
+        // Recuperação: SÓ re-aponta se o webview está em branco (a navegação inicial
+        // falhou no build empacotado). Nunca recarrega uma página já carregada. E as
+        // deps são [tabBar.activeId] (troca de aba), NÃO o tabBar inteiro: senão o
+        // efeito rodava a cada evento de navegação e o re-aponte abortava o load em
+        // curso (-3) e disparava outro → loop infinito de reload (a "piscada").
+        if (show && tab.src) {
+          let cur = ''; try { cur = tab.webview.getURL(); } catch {}
+          if (!cur || cur === 'about:blank') { try { tab.webview.src = tab.src; } catch {} }
+        }
       }
     }
-  }, [view, mode, active, tabBar]);
+  }, [view, mode, active, tabBar.activeId]);
 
   // Troca o modo de visualização (desktop/tablet/celular): re-aplica em todos os
   // webviews (os escondidos não atrapalham) e guarda a preferência.
@@ -628,8 +678,9 @@ export function PreviewPanel({ active, onProjectsChanged, controlsRef, onModeCha
   useEffect(() => {
     let cancelled = false; // efeito desmontou/trocou de projeto: corta o setTimeout e o poller
     activePathRef.current = active?.path || null;
+    refreshTabBar(); // a tira reflete as abas do novo projeto ativo
     if (!active) { setMode('empty'); setUrl(''); return; }
-    setUrl(urlsRef.current.get(active.path) || active.name);
+    setUrl(activeTabOf(active.path)?.url || urlsRef.current.get(active.path) || active.name);
 
     // Rede de segurança: vira pro modo web consultando o status até a URL existir,
     // mesmo que o evento 'preview:ready' não chegue. No build empacotado o push único
@@ -680,7 +731,7 @@ export function PreviewPanel({ active, onProjectsChanged, controlsRef, onModeCha
       }, 0);
     })();
     return () => { cancelled = true; };
-  }, [active, showWebFor, appendLog, onProjectsChanged]);
+  }, [active, showWebFor, appendLog, onProjectsChanged, refreshTabBar]);
 
   // Navega o preview do projeto ativo até `v` (garante http://, troca pra aba
   // Preview e aponta o webview). Caminho único usado tanto pela barra de URL
@@ -707,6 +758,59 @@ export function PreviewPanel({ active, onProjectsChanged, controlsRef, onModeCha
     e.target.blur();
   };
 
+  // --- Ações da tira de abas ---
+  const selectTab = useCallback((id) => {
+    const p = activePathRef.current; if (!p) return;
+    const proj = projTabsRef.current.get(p); if (!proj) return;
+    proj.activeId = id;
+    const tab = proj.tabs.find((t) => t.id === id);
+    if (tab) { setUrl(tab.url || tab.src || ''); setCanBack(tab.canBack); setCanFwd(tab.canFwd); }
+    refreshTabBar();
+  }, [refreshTabBar]);
+
+  const closeTab = useCallback((id) => {
+    const p = activePathRef.current; if (!p) return;
+    const proj = projTabsRef.current.get(p); if (!proj) return;
+    const idx = proj.tabs.findIndex((t) => t.id === id);
+    if (idx === -1 || proj.tabs.length <= 1) return; // nunca fecha a última (a tira some antes disso)
+    const [removed] = proj.tabs.splice(idx, 1);
+    try { removed.webview.remove(); } catch {}
+    if (proj.activeId === id) { // ativa a vizinha
+      const next = proj.tabs[idx] || proj.tabs[idx - 1] || null;
+      proj.activeId = next ? next.id : null;
+      if (next) { setUrl(next.url || next.src || ''); setCanBack(next.canBack); setCanFwd(next.canFwd); }
+    }
+    refreshTabBar();
+  }, [refreshTabBar]);
+
+  const newTab = useCallback(() => {
+    const p = activePathRef.current; if (!p) return;
+    const home = urlsRef.current.get(p) || activeTabOf(p)?.url || 'about:blank';
+    const tab = createTab(p, home, { activate: true });
+    setUrl(tab.url); setMode('web'); setView('preview');
+    refreshTabBar();
+  }, [createTab, refreshTabBar]);
+
+  // Link que abriria "nova janela" (interceptado no main) → vira aba interna. O main
+  // manda o webContentsId de origem; aqui achamos o projeto dono e criamos a aba nele.
+  useEffect(() => {
+    return window.api.on('preview:new-tab', ({ sourceId, url, disposition }) => {
+      if (!url) return;
+      let ownerPath = null;
+      outer: for (const [p, proj] of projTabsRef.current) {
+        for (const t of proj.tabs) {
+          let cid = null; try { cid = t.webview.getWebContentsId(); } catch {}
+          if (cid === sourceId) { ownerPath = p; break outer; }
+        }
+      }
+      if (!ownerPath) return;
+      const foreground = disposition !== 'background-tab';
+      createTab(ownerPath, url, { activate: foreground });
+      if (foreground && activePathRef.current === ownerPath) { setUrl(url); setMode('web'); setView('preview'); }
+      refreshTabBar();
+    });
+  }, [createTab, refreshTabBar]);
+
   const reload = () => { if (active) { try { activeWebviewOf(active.path)?.reload(); } catch {} } };
   // Abre o preview atual no navegador padrão do sistema. Sem lock-in: se a pessoa
   // preferir o navegador dela (DevTools próprio, extensões, etc.), é só um clique.
@@ -723,8 +827,7 @@ export function PreviewPanel({ active, onProjectsChanged, controlsRef, onModeCha
     try {
       await window.api.stopPreview(active.path);
       urlsRef.current.delete(active.path);
-      const w = webviewsRef.current.get(active.path);
-      if (w) { w.remove(); webviewsRef.current.delete(active.path); }
+      removeAllTabs(active.path);
       setMode('empty');
     } finally {
       serverBusyRef.current = false;
@@ -736,8 +839,7 @@ export function PreviewPanel({ active, onProjectsChanged, controlsRef, onModeCha
     manualStopRef.current.delete(active.path); // reiniciar não é parada manual: deixa o fluxo normal (log)
     await window.api.stopPreview(active.path);
     urlsRef.current.delete(active.path);
-    const w = webviewsRef.current.get(active.path);
-    if (w) { w.remove(); webviewsRef.current.delete(active.path); }
+    removeAllTabs(active.path);
     setMode('log');
     setTimeout(async () => {
       try {
@@ -888,6 +990,38 @@ export function PreviewPanel({ active, onProjectsChanged, controlsRef, onModeCha
           <TerminalIcon />
         </ToolButton>
       </div>
+      )}
+
+      {/* Tira de abas discreta: só aparece quando o projeto tem MAIS DE UMA página
+          aberta. Com uma só, fica com altura 0 (invisível) e o site ocupa tudo — a
+          experiência de sempre. Ao surgir uma 2ª aba, ela "estica" pra baixo e o
+          preview encolhe um pouquinho. É o padrão de navegador, sem virar navegador. */}
+      {active && (
+        <div
+          className="shrink-0 overflow-hidden border-b bg-card transition-[height] duration-200 ease-out"
+          style={{ height: inPreview && mode === 'web' && tabBar.tabs.length > 1 ? 36 : 0 }}
+        >
+          <div className="flex h-9 items-stretch overflow-x-auto">
+            {tabBar.tabs.map((tab) => (
+              <TabChip
+                key={tab.id}
+                label={tabLabel(tab, t('preview.tab_untitled'))}
+                active={tab.id === tabBar.activeId}
+                onSelect={() => selectTab(tab.id)}
+                onClose={() => closeTab(tab.id)}
+                closeTitle={t('preview.tab_close')}
+              />
+            ))}
+            <button
+              type="button"
+              onClick={newTab}
+              title={t('preview.tab_new')}
+              className="grid w-9 shrink-0 place-items-center text-muted-foreground transition-colors hover:bg-muted hover:text-foreground [&_svg]:size-4"
+            >
+              <Plus />
+            </button>
+          </div>
+        </div>
       )}
 
       <div ref={bodyRowRef} className="relative flex min-h-0 min-w-0 flex-1">
