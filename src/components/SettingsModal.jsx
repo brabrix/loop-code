@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Sun, Moon, X, Check, Paintbrush, Bot, Wrench, Monitor, Terminal, ZoomIn, ZoomOut, RotateCcw, Bell, Sparkles, Heart, Globe, Mail, ExternalLink, Code2, Save, HardDrive, RefreshCw } from 'lucide-react';
+import { Sun, Moon, X, Check, Paintbrush, Bot, Wrench, Monitor, Terminal, ZoomIn, ZoomOut, RotateCcw, Bell, Sparkles, Heart, Globe, Mail, ExternalLink, Code2, Save, HardDrive, RefreshCw, WrapText } from 'lucide-react';
 import { ClaudeCodeIcon, CodexIcon, OpenCodeIcon, AntigravityIcon } from '@/lib/cliIcons.jsx';
 import { useTheme } from '@/lib/theme.jsx';
 import { Input } from './ui/input.jsx';
@@ -126,6 +126,7 @@ export function SettingsModal({ open, onClose, initialTab = 'appearance', appVer
   const [zoom, setZoom] = useState(1); // fator de zoom da janela (1 = 100%)
   const [notify, setNotify] = useState(true); // notificar quando o Claude termina
   const [autoSave, setAutoSave] = useState(false); // salvar arquivos do editor automaticamente
+  const [wordWrap, setWordWrap] = useState(false); // quebrar linhas longas no editor (estilo VS Code)
   // Detecta as dependências (Node/Git) só quando a aba está aberta — mesmo motor da tela de preparo.
   const deps = useDependencyStatus(open && tab === 'deps');
 
@@ -134,6 +135,7 @@ export function SettingsModal({ open, onClose, initialTab = 'appearance', appVer
     if (!open) return;
     setZoom(Number(localStorage.getItem('appZoom')) || window.api.getZoom() || 1);
     setAutoSave(localStorage.getItem('codeAutoSave') === '1');
+    setWordWrap(localStorage.getItem('codeWordWrap') === '1');
     window.api.getNotify().then((r) => setNotify(r?.enabled !== false)).catch(() => {});
   }, [open]);
 
@@ -148,6 +150,17 @@ export function SettingsModal({ open, onClose, initialTab = 'appearance', appVer
       const next = !v;
       localStorage.setItem('codeAutoSave', next ? '1' : '0');
       window.dispatchEvent(new CustomEvent('ygc:autosave', { detail: next }));
+      return next;
+    });
+  };
+
+  // Quebra de linha também é só do renderer (o CodeView lê e aplica). Mesmo esquema do
+  // autosave: localStorage + evento pra valer na hora, sem reabrir o editor.
+  const toggleWordWrap = () => {
+    setWordWrap((v) => {
+      const next = !v;
+      localStorage.setItem('codeWordWrap', next ? '1' : '0');
+      window.dispatchEvent(new CustomEvent('ygc:wordwrap', { detail: next }));
       return next;
     });
   };
@@ -383,7 +396,7 @@ export function SettingsModal({ open, onClose, initialTab = 'appearance', appVer
           )}
 
           {tab === 'code' && (
-            <div className="mx-auto max-w-3xl">
+            <div className="mx-auto flex max-w-3xl flex-col gap-3">
               <div className="flex items-start justify-between gap-4 rounded-lg border p-4">
                 <div className="min-w-0">
                   <div className="flex items-center gap-1.5 text-[13px] font-medium">
@@ -396,6 +409,20 @@ export function SettingsModal({ open, onClose, initialTab = 'appearance', appVer
                 </div>
                 <Switch checked={autoSave} onCheckedChange={toggleAutoSave}
                   title={autoSave ? t('settings.autosaveOn') : t('settings.autosaveOff')}
+                  className="mt-0.5" />
+              </div>
+
+              <div className="flex items-start justify-between gap-4 rounded-lg border p-4">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-1.5 text-[13px] font-medium">
+                    <WrapText className="size-3.5 text-primary" /> {t('settings.codeWrapTitle')}
+                  </div>
+                  <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+                    {t('settings.codeWrapHelp')}
+                  </p>
+                </div>
+                <Switch checked={wordWrap} onCheckedChange={toggleWordWrap}
+                  title={wordWrap ? t('settings.wrapOn') : t('settings.wrapOff')}
                   className="mt-0.5" />
               </div>
             </div>

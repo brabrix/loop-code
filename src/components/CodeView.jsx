@@ -613,6 +613,15 @@ export function CodeView({ active, openRequest }) {
     window.addEventListener('ygc:autosave', onChange);
     return () => window.removeEventListener('ygc:autosave', onChange);
   }, []);
+
+  // Quebra de linha: preferência ligada nas Configurações (aba "Códigos"). Mesmo esquema
+  // do autosave — mora no localStorage e o SettingsModal avisa por 'ygc:wordwrap'.
+  const [wordWrap, setWordWrap] = useState(() => localStorage.getItem('codeWordWrap') === '1');
+  useEffect(() => {
+    const onChange = (e) => setWordWrap(!!e.detail);
+    window.addEventListener('ygc:wordwrap', onChange);
+    return () => window.removeEventListener('ygc:wordwrap', onChange);
+  }, []);
   // Com autosave ligado, salva os arquivos sujos pouco depois da última digitação (debounce).
   useEffect(() => {
     if (!autoSave) return;
@@ -930,7 +939,7 @@ export function CodeView({ active, openRequest }) {
               theme={theme === 'dark' ? vscodeDark : vscodeLight}
               height="100%"
               style={{ height: '100%' }}
-              extensions={[saveKeymap, editorTheme, ...langFor(activeTab.name)]}
+              extensions={[saveKeymap, editorTheme, ...(wordWrap ? [EditorView.lineWrapping] : []), ...langFor(activeTab.name)]}
               onChange={(v) => setTabs((cur) => cur.map((x) => (x.path === activePathRef.current ? { ...x, content: v, dirty: true } : x)))}
             />
           ) : (
