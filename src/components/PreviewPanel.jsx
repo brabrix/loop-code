@@ -382,18 +382,26 @@ export function PreviewPanel({ active, onProjectsChanged, controlsRef, onModeCha
     if (activate) proj.activeId = id;
 
     const isActiveTab = () => activePathRef.current === projectPath && proj.activeId === id;
+    // A tira só mostra o projeto ativo, então só vale re-projetar quando a navegação é
+    // deste projeto. Sem isso, uma aba de fundo (ou de OUTRO projeto) navegando/pollando
+    // disparava um setTabBar a cada evento → re-render do app inteiro à toa.
+    const isActiveProject = () => activePathRef.current === projectPath;
     const syncNav = () => {
       try { tab.canBack = w.canGoBack(); tab.canFwd = w.canGoForward(); } catch {}
       if (isActiveTab()) { setCanBack(tab.canBack); setCanFwd(tab.canFwd); }
     };
-    w.addEventListener('did-navigate', (e) => { if (e.url) { tab.url = e.url; if (isActiveTab()) setUrl(e.url); refreshTabBar(); } syncNav(); });
-    w.addEventListener('did-navigate-in-page', (e) => { if (e.isMainFrame && e.url) { tab.url = e.url; if (isActiveTab()) setUrl(e.url); refreshTabBar(); } syncNav(); });
-    w.addEventListener('page-title-updated', (e) => { tab.title = e.title || ''; refreshTabBar(); });
+    w.addEventListener('did-navigate', (e) => { if (e.url) { tab.url = e.url; if (isActiveTab()) setUrl(e.url); if (isActiveProject()) refreshTabBar(); } syncNav(); });
+    w.addEventListener('did-navigate-in-page', (e) => { if (e.isMainFrame && e.url) { tab.url = e.url; if (isActiveTab()) setUrl(e.url); if (isActiveProject()) refreshTabBar(); } syncNav(); });
+    w.addEventListener('page-title-updated', (e) => { tab.title = e.title || ''; if (isActiveProject()) refreshTabBar(); });
     w.addEventListener('did-fail-load', (e) => {
-      if (e.errorCode === -3 || w.style.display === 'none') return;
+      if (e.errorCode === -3) return; // navegação abortada (outra começou), não é falha real
+      // Uma aba nova/de fundo que AINDA não carregou precisa re-tentar mesmo escondida
+      // (senão fica em branco pra sempre). Já uma aba que carregou e agora está offscreen
+      // não fica martelando reload.
+      if (w.style.display === 'none' && tab._loaded) return;
       if (w._retry++ < 8) setTimeout(() => { try { w.reload(); } catch {} }, 1000);
     });
-    w.addEventListener('did-finish-load', () => { w._retry = 0; syncNav(); });
+    w.addEventListener('did-finish-load', () => { w._retry = 0; tab._loaded = true; syncNav(); });
     // Botões laterais do mouse → voltar/avançar (detecta no DOM da página).
     w.addEventListener('dom-ready', () => { try { w.executeJavaScript(NAV_INJECT); } catch {} });
     // Ponte do "selecionar elemento": o script injetado emite o pacote via console.
@@ -483,11 +491,14 @@ export function PreviewPanel({ active, onProjectsChanged, controlsRef, onModeCha
     }
   }, [view, mode, grabbing]);
 
-  // Atualiza o estado dos botões voltar/avançar ao trocar de projeto.
+  // Atualiza os botões voltar/avançar ao trocar de projeto OU de aba. Durante a
+  // navegação da aba ativa, o próprio syncNav já mantém canBack/canFwd em dia — por
+  // isso a dep é tabBar.activeId (troca de aba), não o tabBar inteiro (que muda a cada
+  // navegação de qualquer aba e faria este efeito rodar à toa).
   useEffect(() => {
     const w = active && activeWebviewOf(active.path);
     try { setCanBack(!!w && w.canGoBack()); setCanFwd(!!w && w.canGoForward()); } catch { setCanBack(false); setCanFwd(false); }
-  }, [active, mode, tabBar]);
+  }, [active, mode, tabBar.activeId]);
 
   // Esc cancela o modo mesmo quando o foco está na janela do app (não no webview).
   useEffect(() => {
