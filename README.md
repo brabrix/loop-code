@@ -21,6 +21,14 @@
   <img src="imgs/hero.png" alt="Carcará Code: chat com o Claude Code à esquerda e preview do projeto rodando à direita" width="100%">
 </p>
 
+<p align="center">
+  <a href="https://www.youtube.com/watch?v=TZSSrXYWrYU">
+    <img src="https://img.youtube.com/vi/TZSSrXYWrYU/maxresdefault.jpg" alt="Assista à demonstração do Carcará Code" width="70%">
+  </a>
+  <br>
+  <a href="https://www.youtube.com/watch?v=TZSSrXYWrYU"><strong>&#9654;&nbsp; Assista à demonstração no YouTube</strong></a>
+</p>
+
 ---
 
 ## O que é
