@@ -280,7 +280,7 @@ function ShotPicker({ onArea, onFull, active, disabled }) {
         <Camera />
       </ToolButton>
       {open && (
-        <div className="absolute left-0 top-9 z-50 min-w-[170px] overflow-hidden rounded-md border bg-popover py-1 shadow-md">
+        <div className="absolute right-0 top-9 z-50 min-w-[170px] overflow-hidden rounded-md border bg-popover py-1 shadow-md">
           {OPTS.map((o) => (
             <button
               key={o.key}
