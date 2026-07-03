@@ -13,7 +13,8 @@ const mediaCore = require('./media-core.cjs');
 const claudeSessions = require('./claude-sessions.cjs');
 const { initUpdater } = require('./updater.cjs');
 const { LocalPty } = require('./remote/localPty.cjs');
-const { isRemote, parseSshUri, hostKey } = require('./remote/sshUri.cjs');
+const { isRemote, parseSshUri, buildSshUri, hostKey } = require('./remote/sshUri.cjs');
+const { parseSshConfig } = require('./remote/sshConfig.cjs');
 const { SshShell } = require('./remote/sshShell.cjs');
 const { makeSecretStore } = require('./remote/secretStore.cjs');
 const { makeKnownHosts } = require('./remote/knownHosts.cjs');
@@ -605,6 +606,58 @@ ipcMain.handle('projects:add', async () => {
   return { added };
 });
 
+// Cadastra/atualiza um projeto remoto. profile: { host, port, user, authType,
+// keyPath, remoteDir, label }. secret: senha ou passphrase (opcional).
+ipcMain.handle('remotes:add', (evt, { profile, secret }) => {
+  const port = parseInt(profile.port, 10) || 22;
+  const uri = buildSshUri({ user: profile.user, host: profile.host, port, remoteDir: profile.remoteDir });
+  const hk = hostKey(uri);
+  const c = loadConfig();
+  c.remotes = c.remotes || {};
+  c.remotes[hk] = {
+    host: profile.host, port, user: profile.user,
+    authType: profile.authType, keyPath: profile.keyPath || '',
+    remoteDir: profile.remoteDir || '/', label: profile.label || '',
+  };
+  if (!c.projects.includes(uri)) c.projects.push(uri);
+  saveConfig(c);
+  let secretSaved = true;
+  if (secret && (profile.authType === 'password' || profile.authType === 'key')) {
+    secretSaved = secretStore.save(hk, secret);
+  }
+  return { uri, hostKey: hk, secretSaved };
+});
+
+ipcMain.handle('ssh:configHosts', () => {
+  try {
+    const txt = fs.readFileSync(path.join(os.homedir(), '.ssh', 'config'), 'utf8');
+    return { hosts: parseSshConfig(txt) };
+  } catch { return { hosts: [] }; }
+});
+
+// Testa a conexão sem persistir: conecta, roda `pwd`, desconecta.
+ipcMain.handle('remote:test', (evt, { profile, secret }) => new Promise((resolve) => {
+  const conn = new SshClient();
+  let done = false;
+  const finish = (ok, message) => { if (done) return; done = true; try { conn.end(); } catch {} resolve({ ok, message }); };
+  const cfg = {
+    host: profile.host, port: parseInt(profile.port, 10) || 22, username: profile.user,
+    readyTimeout: 10000,
+    hostVerifier: () => true, // teste não persiste TOFU
+  };
+  if (profile.authType === 'key') { try { cfg.privateKey = fs.readFileSync(profile.keyPath); } catch (e) { return finish(false, 'Chave: ' + e.message); } if (secret) cfg.passphrase = secret; }
+  else if (profile.authType === 'password') cfg.password = secret;
+  else if (profile.authType === 'agent') cfg.agent = process.platform === 'win32' ? 'pageant' : process.env.SSH_AUTH_SOCK || '';
+  conn.on('ready', () => conn.exec('pwd', (err, stream) => {
+    if (err) return finish(false, err.message);
+    let out = '';
+    stream.on('data', (d) => { out += d.toString(); });
+    stream.on('close', () => finish(true, 'Conectado — pwd: ' + out.trim()));
+  }));
+  conn.on('error', (err) => finish(false, err.message));
+  try { conn.connect(cfg); } catch (e) { finish(false, e.message); }
+}));
+
 // Remove um projeto da lista (não apaga nada do disco).
 ipcMain.handle('projects:remove', (evt, { projectPath }) => {
   const cfg = loadConfig();
@@ -615,6 +668,15 @@ ipcMain.handle('projects:remove', (evt, { projectPath }) => {
   }
   if (cfg.sessions) delete cfg.sessions[projectPath];
   if (cfg.projectMeta) delete cfg.projectMeta[projectPath];
+  if (isRemote(projectPath)) {
+    const hk = hostKey(projectPath);
+    try { connections.end(hk); } catch {}
+    try { secretStore.remove(hk); } catch {}
+    if (cfg.remotes) delete cfg.remotes[hk];
+    // mata o shell remoto do projeto, se houver
+    const sh = shells.get(projectPath);
+    if (sh) { try { sh.pty.kill(); } catch {} shells.delete(projectPath); }
+  }
   saveConfig(cfg);
   return { ok: true };
 });
@@ -685,8 +747,26 @@ ipcMain.handle('projects:list', () => {
   const meta = cfg.projectMeta || {};
   // Preserva a ordem salva no config.json (definida pelo drag-and-drop do rail).
   return cfg.projects
-    .filter((p) => { try { return fs.statSync(p).isDirectory(); } catch { return false; } })
+    .filter((p) => {
+      if (isRemote(p)) return true;
+      try { return fs.statSync(p).isDirectory(); } catch { return false; }
+    })
     .map((p) => {
+      if (isRemote(p)) {
+        const hk = hostKey(p);
+        const prof = (cfg.remotes && cfg.remotes[hk]) || {};
+        const parsed = parseSshUri(p) || {};
+        return {
+          name: prof.label || `${parsed.user}@${parsed.host}`,
+          path: p,
+          hasPkg: false,
+          running: false,
+          icon: null,
+          color: (cfg.projectMeta && cfg.projectMeta[p] && cfg.projectMeta[p].color) || null,
+          remote: true,
+          status: connections.status(hk),
+        };
+      }
       let hasPkg = false;
       try { fs.accessSync(path.join(p, 'package.json')); hasPkg = true; } catch {}
       const m = meta[p] || {};
@@ -697,6 +777,7 @@ ipcMain.handle('projects:list', () => {
         running: runningServers.has(p),
         icon: m.icon || findFavicon(p),   // imagem escolhida à mão vence o favicon
         color: m.color || null,           // null → o rail usa colorFor(name)
+        remote: false,
       };
     });
 });
