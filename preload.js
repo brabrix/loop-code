@@ -81,6 +81,12 @@ contextBridge.exposeInMainWorld('api', {
   shellInput: (projectPath, data) => ipcRenderer.send('shell:input', { projectPath, data }),
   shellResize: (projectPath, cols, rows) => ipcRenderer.send('shell:resize', { projectPath, cols, rows }),
 
+  // Projetos remotos (SSH)
+  addRemote: (profile, secret) => ipcRenderer.invoke('remotes:add', { profile, secret }),
+  testRemote: (profile, secret) => ipcRenderer.invoke('remote:test', { profile, secret }),
+  sshConfigHosts: () => ipcRenderer.invoke('ssh:configHosts'),
+  reconnectRemote: (projectPath) => ipcRenderer.invoke('remote:reconnect', { projectPath }),
+
   // Git (source control)
   gitIsRepo: (projectPath) => ipcRenderer.invoke('git:isRepo', { projectPath }),
   gitStatus: (projectPath) => ipcRenderer.invoke('git:status', { projectPath }),

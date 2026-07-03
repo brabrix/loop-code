@@ -658,6 +658,12 @@ ipcMain.handle('remote:test', (evt, { profile, secret }) => new Promise((resolve
   try { conn.connect(cfg); } catch (e) { finish(false, e.message); }
 }));
 
+ipcMain.handle('remote:reconnect', async (evt, { projectPath }) => {
+  if (!isRemote(projectPath)) return { ok: false };
+  try { await connections.reconnect(hostKey(projectPath)); return { ok: true }; }
+  catch (e) { return { ok: false, error: e.message }; }
+});
+
 // Remove um projeto da lista (não apaga nada do disco).
 ipcMain.handle('projects:remove', (evt, { projectPath }) => {
   const cfg = loadConfig();
