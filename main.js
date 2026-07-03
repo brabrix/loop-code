@@ -657,6 +657,7 @@ ipcMain.handle('projects:list', () => {
         path: p,
         hasPkg,
         running: runningServers.has(p),
+        previewType: phpRuntime.detectProjectType(p),
         icon: m.icon || findFavicon(p),   // imagem escolhida à mão vence o favicon
         color: m.color || null,           // null → o rail usa colorFor(name)
       };
