@@ -242,8 +242,8 @@ export function SettingsModal({ open, onClose, initialTab = 'appearance', appVer
                         {p.icon
                           ? <img src={p.icon} alt="" className="size-5 rounded-sm object-contain" />
                           : <span className="grid size-5 place-items-center rounded-sm bg-muted text-[11px] font-semibold uppercase">{p.name?.[0] || '?'}</span>}
-                        <span className="truncate text-sm font-medium">{p.name}</span>
-                        <span className="ml-1 flex items-center gap-1 text-xs text-muted-foreground">
+                        <span className="min-w-0 flex-1 truncate text-sm font-medium" title={p.name}>{p.name}</span>
+                        <span className="ml-1 flex shrink-0 items-center gap-1 text-xs text-muted-foreground">
                           {cur.ais.map((k) => <CliBadge key={k} optKey={k} small />)}
                         </span>
                       </div>
