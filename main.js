@@ -12,6 +12,7 @@ const mcpOauth = require('./mcp-oauth.cjs');
 const mediaCore = require('./media-core.cjs');
 const claudeSessions = require('./claude-sessions.cjs');
 const { initUpdater } = require('./updater.cjs');
+const phpRuntime = require('./php-runtime.cjs');
 
 let mainWindow;
 let updater = null;
@@ -2252,11 +2253,88 @@ function runInstall(projectPath, manager) {
   });
 }
 
+async function startPhpPreview(projectPath) {
+  const entry = { proc: null, url: null, port: null, log: '' };
+  runningServers.set(projectPath, entry);
+
+  // 1) Garante o runtime PHP (baixa na 1ª vez).
+  let phpExe;
+  try {
+    const cacheBaseDir = path.join(app.getPath('userData'), 'runtimes', 'php');
+    phpExe = await phpRuntime.ensurePhpRuntime({
+      cacheBaseDir,
+      onPhase: (m) => sendPhase(projectPath, m),
+    });
+  } catch (e) {
+    runningServers.delete(projectPath);
+    sendLog(projectPath, '\n[erro] ' + e.message + '\n');
+    return { error: e.message };
+  }
+
+  // 2) Porta livre + php -S no docroot certo.
+  const port = await pickFreePort();
+  entry.chosenPort = port;
+  const docroot = phpRuntime.resolvePhpDocroot(projectPath);
+  const args = phpRuntime.buildPhpServeArgs({ port, docroot });
+  console.log(`[preview:php] ${path.basename(projectPath)} -> porta ${port} | php ${args.join(' ')}`);
+  sendPhase(projectPath, `Porta livre escolhida: ${port}`);
+  sendPhase(projectPath, `Subindo: php ${args.join(' ')}`);
+
+  const startedAt = Date.now();
+  const proc = spawn(phpExe, args, { cwd: projectPath, env: { ...process.env } });
+  entry.proc = proc;
+
+  const markReady = (foundPort) => {
+    if (entry.url) return;
+    entry.port = foundPort;
+    entry.url = `http://localhost:${foundPort}`;
+    if (entry.probe) { clearInterval(entry.probe); entry.probe = null; }
+    console.log(`[preview:php] ${path.basename(projectPath)} pronto em ${entry.url}`);
+    sendPhase(projectPath, `Preview pronto em ${entry.url}`);
+    safeSend('preview:ready', { projectPath, url: entry.url });
+  };
+
+  const onData = (d) => { const s = d.toString(); entry.log += s; sendLog(projectPath, s); };
+  proc.stdout.on('data', onData);
+  proc.stderr.on('data', onData);
+
+  // Probe determinístico: a porta que escolhemos e forçamos.
+  entry.probe = setInterval(async () => {
+    if (entry.url) return;
+    if (await probePort(port)) markReady(port);
+  }, 600);
+
+  proc.on('exit', (code) => {
+    if (entry.probe) { clearInterval(entry.probe); entry.probe = null; }
+    if (!entry.url) {
+      const elapsedMs = Date.now() - startedAt;
+      if (phpRuntime.isVcRedistError({ log: entry.log, elapsedMs })) {
+        sendLog(projectPath,
+          '\n[PHP não pôde iniciar] Falta o "Visual C++ Redistributable" da Microsoft.\n' +
+          'Instale o VC redist x64 e tente de novo:\n' +
+          'https://aka.ms/vs/17/release/vc_redist.x64.exe\n');
+      } else {
+        sendLog(projectPath, `\n[servidor PHP encerrou sem subir — código ${code}]\n`);
+      }
+    }
+    runningServers.delete(projectPath);
+    safeSend('preview:exit', { projectPath });
+  });
+  proc.on('error', (e) => sendLog(projectPath, '\n[erro ao iniciar php] ' + e.message + '\n'));
+
+  return { running: true, starting: true, cmd: `php ${args.join(' ')}` };
+}
+
 ipcMain.handle('preview:start', async (evt, { projectPath }) => {
   if (runningServers.has(projectPath)) {
     const e = runningServers.get(projectPath);
     if (e.url) safeSend('preview:ready', { projectPath, url: e.url });
     return { running: true, url: e.url };
+  }
+  // Ramifica por tipo de projeto. Node é o fluxo de sempre (abaixo, INTOCADO).
+  const projectType = phpRuntime.detectProjectType(projectPath);
+  if (projectType === 'php') {
+    return startPhpPreview(projectPath);
   }
   const cmd = detectDevCommand(projectPath);
   if (!cmd) return { error: 'Nenhum script dev/start/serve no package.json' };
