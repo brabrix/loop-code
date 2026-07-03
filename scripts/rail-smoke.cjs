@@ -30,14 +30,14 @@ eq(
   'remove filho órfão da pasta'
 );
 
-// 4) Pasta que fica sem filhos é descartada.
+// 4) Pasta vazia PERSISTE (o "+" cria pasta vazia; só o drag-out via applyDrop dissolve).
 eq(
   reconcile(
     [{ type: 'folder', id: 'f1', name: 'P', collapsed: false, children: ['/gone'] }],
     []
   ),
-  [],
-  'descarta pasta sem filhos'
+  [{ type: 'folder', id: 'f1', name: 'P', collapsed: false, children: [] }],
+  'mantém pasta vazia (filhos órfãos removidos, pasta fica)'
 );
 
 // 5) Projeto novo (em projects, ausente do rail) entra solto no fim.

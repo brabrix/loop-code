@@ -24,7 +24,7 @@ import { colorFor, initials } from './lib/projectColor';
 import { useT } from './lib/i18n';
 import { useLayout } from './lib/layoutContext.jsx';
 import { resolveLayout } from './lib/layout.js';
-import { toggleCollapse, renameFolder, dissolveFolder, applyDrop } from './lib/railTree';
+import { toggleCollapse, renameFolder, dissolveFolder, applyDrop, addFolder } from './lib/railTree';
 
 export default function App() {
   const t = useT();
@@ -427,6 +427,7 @@ export default function App() {
       onRestart={restartProject}
       onStop={stopProject}
       onReorder={reorderProjects}
+      onAddFolder={() => persistRail(addFolder(rail))}
       onToggleFolder={(id) => persistRail(toggleCollapse(rail, id))}
       onApplyDrop={(ctx) => persistRail(applyDrop(rail, { ...ctx, newFolderName: t('rail.folder_default') }))}
       onRenameFolder={(id, name) => persistRail(renameFolder(rail, id, name))}

@@ -9,7 +9,8 @@
 //   - só paths que existem em `projects`;
 //   - sem duplicatas (1ª ocorrência vence, solta ou em pasta);
 //   - projetos novos (em projects, ausentes do rail) entram soltos no fim;
-//   - pastas sem filhos são removidas (config nunca guarda pasta vazia);
+//   - pastas vazias PERSISTEM (o usuário pode criar pasta pelo "+"); quem esvazia via
+//     drag-and-drop é o applyDrop, que descarta a pasta ao tirar o último filho;
 //   - shapes com defaults.
 
 function reconcile(rail, projects) {
@@ -28,7 +29,7 @@ function reconcile(rail, projects) {
           children.push(c);
         }
       }
-      if (children.length === 0) continue; // pasta vazia não persiste
+      // Pasta vazia PERSISTE (criada pelo "+"). Só o applyDrop dissolve ao tirar o último filho.
       out.push({
         type: 'folder',
         id: String(raw.id || ''),

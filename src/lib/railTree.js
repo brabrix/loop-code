@@ -36,6 +36,13 @@ export function buildRows(rail, projectByPath) {
   return rows;
 }
 
+// Cria uma pasta vazia no fim do rail (o "+"). A pasta persiste vazia até o usuário
+// arrastar projetos pra dentro ou desfazê-la; reconcile() em rail-core mantém vazias.
+export function addFolder(rail, name = '') {
+  const list = Array.isArray(rail) ? rail : [];
+  return [...list, { type: 'folder', id: nextFolderId(list), name, collapsed: false, children: [] }];
+}
+
 export function toggleCollapse(rail, folderId) {
   return rail.map((it) => (it.type === 'folder' && it.id === folderId ? { ...it, collapsed: !it.collapsed } : it));
 }

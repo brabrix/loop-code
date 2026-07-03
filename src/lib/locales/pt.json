@@ -36,7 +36,9 @@
     "add_folder_hint": "Para criar uma pasta, arraste um projeto para cima de outro e segure no centro.",
     "folder_open_tooltip": "Abrir/recolher pasta",
     "menu_folder_rename": "Renomear pasta",
-    "menu_folder_dissolve": "Desfazer pasta"
+    "menu_folder_dissolve": "Desfazer pasta",
+    "rename_save": "Salvar",
+    "rename_cancel": "Cancelar"
   },
   "app": {
     "no_project_selected": "Selecione um projeto",
