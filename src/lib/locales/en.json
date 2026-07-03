@@ -594,5 +594,28 @@
     "layoutPresetRR": "Sidebar and Claude on the right",
     "aboutVersionLabel": "Installed version",
     "checkUpdates": "Check for updates"
+  },
+  "remote": {
+    "title": "New remote project (SSH)",
+    "import_config": "Import from ~/.ssh/config",
+    "no_hosts": "No hosts found.",
+    "ph_host": "Host (e.g. 203.0.113.10)",
+    "ph_user": "User",
+    "ph_port": "Port",
+    "auth_key": "Private key (file)",
+    "auth_password": "Password",
+    "auth_agent": "ssh-agent",
+    "ph_keypath": "Key file path (e.g. ~/.ssh/id_ed25519)",
+    "ph_passphrase": "Key passphrase (optional)",
+    "ph_password": "Password",
+    "ph_remotedir": "Remote directory (e.g. /home/ygor/app)",
+    "ph_label": "Label (optional)",
+    "test_btn": "Test connection",
+    "cancel": "Cancel",
+    "save": "Save",
+    "err_host": "Enter the host.",
+    "err_user": "Enter the user.",
+    "err_remotedir": "Enter the remote directory.",
+    "err_keypath": "Enter the private key file."
   }
 }

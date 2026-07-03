@@ -594,5 +594,28 @@
     "layoutPresetRR": "Rail e Claude à direita",
     "aboutVersionLabel": "Versão instalada",
     "checkUpdates": "Verificar atualizações"
+  },
+  "remote": {
+    "title": "Novo projeto remoto (SSH)",
+    "import_config": "Importar do ~/.ssh/config",
+    "no_hosts": "Nenhum host encontrado.",
+    "ph_host": "Host (ex.: 203.0.113.10)",
+    "ph_user": "Usuário",
+    "ph_port": "Porta",
+    "auth_key": "Chave privada (arquivo)",
+    "auth_password": "Senha",
+    "auth_agent": "ssh-agent",
+    "ph_keypath": "Caminho da chave (ex.: ~/.ssh/id_ed25519)",
+    "ph_passphrase": "Passphrase da chave (opcional)",
+    "ph_password": "Senha",
+    "ph_remotedir": "Diretório remoto (ex.: /home/ygor/app)",
+    "ph_label": "Rótulo (opcional)",
+    "test_btn": "Testar conexão",
+    "cancel": "Cancelar",
+    "save": "Salvar",
+    "err_host": "Informe o host.",
+    "err_user": "Informe o usuário.",
+    "err_remotedir": "Informe o diretório remoto.",
+    "err_keypath": "Informe o arquivo da chave privada."
   }
 }
