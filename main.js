@@ -12,6 +12,7 @@ const mcpOauth = require('./mcp-oauth.cjs');
 const mediaCore = require('./media-core.cjs');
 const claudeSessions = require('./claude-sessions.cjs');
 const { initUpdater } = require('./updater.cjs');
+const { LocalPty } = require('./remote/localPty.cjs');
 
 let mainWindow;
 let updater = null;
@@ -1493,13 +1494,7 @@ ipcMain.handle('term:ensure', (evt, { sessionId, projectPath, cols, rows, theme 
     return { error: 'node-pty não carregou: ' + e.message };
   }
 
-  const proc = pty.spawn(shellForOS(), [], {
-    name: 'xterm-256color',
-    cols: cols || 80,
-    rows: rows || 24,
-    cwd: projectPath,
-    env: cleanEnv(),
-  });
+  const proc = new LocalPty({ ptyLib: pty, shell: shellForOS(), env: cleanEnv(), cwd: projectPath, cols, rows });
   const { cli } = resolveProjectCli(projectPath);
   const entry = { pty: proc, buffer: '', projectPath, sessionId, cli };
   terminals.set(sessionId, entry);
@@ -1561,13 +1556,7 @@ ipcMain.handle('shell:ensure', (evt, { projectPath, cols, rows }) => {
     return { error: 'node-pty não carregou: ' + e.message };
   }
 
-  const proc = pty.spawn(shellForOS(), [], {
-    name: 'xterm-256color',
-    cols: cols || 80,
-    rows: rows || 24,
-    cwd: projectPath,
-    env: cleanEnv(),
-  });
+  const proc = new LocalPty({ ptyLib: pty, shell: shellForOS(), env: cleanEnv(), cwd: projectPath, cols, rows });
   const entry = { pty: proc, buffer: '' };
   shells.set(projectPath, entry);
 
