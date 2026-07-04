@@ -7,7 +7,7 @@ import {
   Save, Copy, X, Search, ChevronRight, ChevronDown,
   Scissors, ClipboardPaste, Link2, Pencil, Trash2, ExternalLink,
   ZoomIn, ZoomOut, Maximize2, Eye, EyeOff, Plus, KeyRound, Code2,
-  FilePlus, FolderPlus, Sheet, Music,
+  FilePlus, FolderPlus, Sheet, Music, Loader2,
 } from 'lucide-react';
 import { fileIconUrl, folderIconUrl } from '@/lib/fileIcons';
 import { TransformWrapper, TransformComponent } from 'react-zoom-pan-pinch';
@@ -1207,8 +1207,18 @@ function MediaFallback({ name }) {
 function Tree({ dirPath, depth }) {
   const { refresh } = useContext(FileTreeCtx);
   const [items, setItems] = useState(null);
-  useEffect(() => { window.api.listDir(dirPath).then(setItems); }, [dirPath, refresh]);
-  if (!items) return null;
+  useEffect(() => {
+    let alive = true;
+    window.api.listDir(dirPath).then((r) => { if (alive) setItems(r); });
+    return () => { alive = false; };
+  }, [dirPath, refresh]);
+  // Enquanto o listDir está em voo (notadamente no remoto/SFTP, que tem latência),
+  // mostra um spinner no lugar da pasta vazia.
+  if (!items) return (
+    <div className="flex items-center py-1" style={{ paddingLeft: depth * 12 + 8 }}>
+      <Loader2 className="size-3.5 animate-spin text-muted-foreground" />
+    </div>
+  );
   return items.map((it) => <TreeNode key={it.path} item={it} depth={depth} />);
 }
 
