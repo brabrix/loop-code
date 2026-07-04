@@ -74,6 +74,20 @@ function makeConnections(deps) {
 
   return {
     connFor,
+    async sftp(hostKey) {
+      const client = await connFor(hostKey);
+      const rec = conns.get(hostKey);
+      if (rec && rec.sftpSession) return rec.sftpSession;
+      const session = await new Promise((resolve, reject) => {
+        client.sftp((err, s) => (err ? reject(err) : resolve(s)));
+      });
+      if (rec) {
+        rec.sftpSession = session;
+        // Sessão morre junto com a conexão; limpa o cache pra reabrir na próxima.
+        try { session.on('close', () => { if (rec.sftpSession === session) rec.sftpSession = null; }); } catch {}
+      }
+      return session;
+    },
     status: (hostKey) => (conns.get(hostKey) || {}).status || 'idle',
     reconnect(hostKey) { const r = conns.get(hostKey); if (r) { try { r.client.removeAllListeners('close'); } catch {} try { r.client.end(); } catch {} conns.delete(hostKey); } return connFor(hostKey); },
     end(hostKey) {

@@ -89,3 +89,47 @@ describe('makeConnections', () => {
     expect(conns.status('ygor@h:22')).toBe('connected'); // rec do client2 preservado
   });
 });
+
+describe('connections.sftp', () => {
+  function fakeDeps(sftpImpl) {
+    const client = {
+      _h: {},
+      on(ev, cb) { this._h[ev] = cb; return this; },
+      connect() { setTimeout(() => this._h.ready && this._h.ready(), 0); },
+      sftp(cb) { sftpImpl(cb); },
+      end() {},
+      removeAllListeners() {},
+    };
+    return {
+      client,
+      deps: {
+        Client: function () { return client; },
+        getProfile: () => ({ host: 'h', port: 22, user: 'root', authType: 'password' }),
+        getSecret: () => 'pw',
+        readKey: () => Buffer.from(''),
+        knownHosts: { check: () => 'trusted', fingerprint: () => 'fp', trust: () => {} },
+        confirmHostKey: () => true,
+        onStatus: () => {},
+        agentFor: () => '',
+      },
+    };
+  }
+
+  it('abre a sessão SFTP e reusa a mesma na 2ª chamada', async () => {
+    let opened = 0;
+    const session = { on() {} };
+    const { deps } = fakeDeps((cb) => { opened++; cb(null, session); });
+    const conns = makeConnections(deps);
+    const s1 = await conns.sftp('root@h:22');
+    const s2 = await conns.sftp('root@h:22');
+    expect(s1).toBe(session);
+    expect(s2).toBe(session);
+    expect(opened).toBe(1); // cacheada
+  });
+
+  it('propaga erro do client.sftp', async () => {
+    const { deps } = fakeDeps((cb) => cb(new Error('sftp falhou')));
+    const conns = makeConnections(deps);
+    await expect(conns.sftp('root@h:22')).rejects.toThrow('sftp falhou');
+  });
+});
