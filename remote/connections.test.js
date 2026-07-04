@@ -132,4 +132,16 @@ describe('connections.sftp', () => {
     const conns = makeConnections(deps);
     await expect(conns.sftp('root@h:22')).rejects.toThrow('sftp falhou');
   });
+
+  it('chamadas concorrentes abrem o canal só uma vez', async () => {
+    let opened = 0;
+    const session = { on() {} };
+    const { deps } = fakeDeps((cb) => { opened++; setTimeout(() => cb(null, session), 0); });
+    const conns = makeConnections(deps);
+    await conns.connFor('root@h:22'); // conexão já estabelecida, como no uso real do file browser
+    const [a, b] = await Promise.all([conns.sftp('root@h:22'), conns.sftp('root@h:22')]);
+    expect(a).toBe(session);
+    expect(b).toBe(session);
+    expect(opened).toBe(1);
+  });
 });

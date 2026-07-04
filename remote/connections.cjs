@@ -78,15 +78,25 @@ function makeConnections(deps) {
       const client = await connFor(hostKey);
       const rec = conns.get(hostKey);
       if (rec && rec.sftpSession) return rec.sftpSession;
-      const session = await new Promise((resolve, reject) => {
+      if (rec && rec.sftpPromise) return rec.sftpPromise;
+
+      const promise = new Promise((resolve, reject) => {
         client.sftp((err, s) => (err ? reject(err) : resolve(s)));
+      }).then((session) => {
+        if (rec) {
+          rec.sftpSession = session;
+          rec.sftpPromise = null;
+          // Sessão morre junto com a conexão; limpa o cache pra reabrir na próxima.
+          try { session.on('close', () => { if (rec.sftpSession === session) rec.sftpSession = null; }); } catch {}
+        }
+        return session;
+      }, (err) => {
+        if (rec) rec.sftpPromise = null;
+        throw err;
       });
-      if (rec) {
-        rec.sftpSession = session;
-        // Sessão morre junto com a conexão; limpa o cache pra reabrir na próxima.
-        try { session.on('close', () => { if (rec.sftpSession === session) rec.sftpSession = null; }); } catch {}
-      }
-      return session;
+
+      if (rec) rec.sftpPromise = promise;
+      return promise;
     },
     status: (hostKey) => (conns.get(hostKey) || {}).status || 'idle',
     reconnect(hostKey) { const r = conns.get(hostKey); if (r) { try { r.client.removeAllListeners('close'); } catch {} try { r.client.end(); } catch {} conns.delete(hostKey); } return connFor(hostKey); },
