@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Plus, Trash2, RotateCcw, Square, GripHorizontal, Pencil, Undo2, ChevronDown, FolderPlus, Folder as FolderIcon, Settings2 } from 'lucide-react';
+import { Plus, Trash2, RotateCcw, Square, GripHorizontal, Pencil, Undo2, ChevronDown, FolderPlus, Folder as FolderIcon, Settings2, Server } from 'lucide-react';
 import { SettingsIcon } from './ui/settings.jsx';
 import { SearchIcon } from './ui/search.jsx';
 import { RailFolderIcon } from './RailFolder.jsx';
@@ -11,7 +11,7 @@ import { cn } from '@/lib/utils';
 import { useT } from '@/lib/i18n';
 import { hasPendingUpdate } from '@/lib/updateView';
 
-export function Rail({ projects, rail = [], projectByPath, active, activity = {}, onOpen, onAdd, onAddFolder, onRemove, onRestart, onStop, onReorder, onToggleFolder, onApplyDrop, onRenameFolder, onDissolveFolder, onRename, onSetColor, onSetIcon, onResetCustom, onOpenSettings, onSearch, onRailGrab, width = 64, version = '', update, onOpenAbout }) {
+export function Rail({ projects, rail = [], projectByPath, active, activity = {}, onOpen, onAdd, onAddFolder, onAddRemote, onRemove, onRestart, onStop, onReorder, onToggleFolder, onApplyDrop, onRenameFolder, onDissolveFolder, onRename, onSetColor, onSetIcon, onResetCustom, onOpenSettings, onSearch, onRailGrab, width = 64, version = '', update, onOpenAbout }) {
   const t = useT();
   const [menu, setMenu] = useState(null);               // menu de projeto { x, y, project }
   const [folderMenu, setFolderMenu] = useState(null);   // menu de pasta { x, y, folder }
@@ -157,6 +157,13 @@ export function Rail({ projects, rail = [], projectByPath, active, activity = {}
         </span>
         {p.running && (
           <span className="absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full border-2 border-card bg-green-500" />
+        )}
+        {p.remote && (
+          <span
+            title={t('rail.ssh_' + (p.status || 'idle'))}
+            className="absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full border-2 border-card"
+            style={{ background: p.status === 'connected' ? '#16a34a' : p.status === 'connecting' ? '#f59e0b' : (p.status === 'error' || p.status === 'disconnected') ? '#ef4444' : '#9ca3af' }}
+          />
         )}
         {activity[p.path] && (
           <span className="absolute -right-0.5 -top-0.5 flex h-2.5 w-2.5">
@@ -360,6 +367,14 @@ export function Rail({ projects, rail = [], projectByPath, active, activity = {}
               >
                 <FolderIcon className="h-3.5 w-3.5 shrink-0" />
                 <span className="truncate">{t('rail.add_menu_folder')}</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => { setAddMenu(null); onAddRemote?.(); }}
+                className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[13px] hover:bg-muted"
+              >
+                <Server className="h-3.5 w-3.5 shrink-0" />
+                <span className="truncate">{t('rail.add_remote')}</span>
               </button>
             </div>
           </>

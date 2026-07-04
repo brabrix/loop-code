@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog, shell, clipboard, nativeImage, Menu, webContents, Notification, protocol } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell, clipboard, nativeImage, Menu, webContents, Notification, protocol, safeStorage } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
@@ -15,6 +15,14 @@ const aiCli = require('./ai-cli.cjs');
 const { initUpdater } = require('./updater.cjs');
 const phpRuntime = require('./php-runtime.cjs');
 const { reconcile: reconcileRail } = require('./rail-core.cjs');
+const { LocalPty } = require('./remote/localPty.cjs');
+const { isRemote, parseSshUri, buildSshUri, hostKey } = require('./remote/sshUri.cjs');
+const { parseSshConfig } = require('./remote/sshConfig.cjs');
+const { SshShell } = require('./remote/sshShell.cjs');
+const { makeSecretStore } = require('./remote/secretStore.cjs');
+const { makeKnownHosts } = require('./remote/knownHosts.cjs');
+const { makeConnections } = require('./remote/connections.cjs');
+const { Client: SshClient } = require('ssh2');
 
 let mainWindow;
 let updater = null;
@@ -22,6 +30,11 @@ const runningServers = new Map(); // projectPath -> { proc, url, port, log }
 const terminals = new Map();      // sessionId -> { pty, buffer, projectPath } (sessões do Claude Code)
 const shells = new Map();         // projectPath -> { pty, buffer } (terminal livre por projeto)
 let ptyLib = null;
+// Camada 1 SSH: instanciados em app.whenReady() (precisam de app.getPath('userData')).
+// Módulo-scope (não const dentro do whenReady) pra ficarem visíveis aos handlers IPC.
+let secretStore = null;
+let knownHosts = null;
+let connections = null;
 
 const APP_NAME = 'Carcará Code';
 const APP_ICON = path.join(__dirname, 'build', 'icon.png');
@@ -78,6 +91,30 @@ function saveConfig(cfg) {
   try { fs.writeFileSync(configPath(), JSON.stringify(cfg, null, 2)); } catch {}
 }
 
+// Perfil de um projeto remoto, guardado em cfg.remotes[hostKey] (não-secreto).
+function remoteProfile(hk) {
+  const c = loadConfig();
+  return (c.remotes && c.remotes[hk]) || null;
+}
+
+// Confirmação TOFU do host key via diálogo nativo. Retorna Promise<boolean>.
+function confirmHostKey(hk, fingerprint, state) {
+  const changed = state === 'changed';
+  const title = changed ? 'Host key MUDOU' : 'Novo host SSH';
+  const detail = changed
+    ? `A identidade de ${hk} mudou (${fingerprint}). Pode ser um servidor recriado — ou um ataque. Confiar mesmo assim?`
+    : `Primeira conexão com ${hk}.\nFingerprint: ${fingerprint}\nConfiar neste servidor?`;
+  return dialog.showMessageBox(mainWindow, {
+    type: changed ? 'warning' : 'question',
+    buttons: ['Confiar', 'Cancelar'],
+    defaultId: changed ? 1 : 0,
+    cancelId: 1,
+    title,
+    message: title,
+    detail,
+  }).then((r) => r.response === 0);
+}
+
 const NATIVE_STRINGS = require('./main.i18n.cjs');
 
 // Idioma do processo main: config.json > idioma do sistema > 'pt'.
@@ -120,6 +157,7 @@ function cleanup() {
   for (const s of shells.values()) { try { s.pty.kill(); } catch {} }
   shells.clear();
   try { mcpCore.mcpDisconnectAll(); } catch {}
+  try { connections.endAll(); } catch {}
 }
 
 // Serve um arquivo de mídia pelo scheme ygc-media://, respeitando o header Range pra
@@ -236,6 +274,23 @@ function createWindow() {
 }
 
 app.whenReady().then(() => {
+  secretStore = makeSecretStore({
+    crypto: safeStorage,
+    filePath: path.join(app.getPath('userData'), 'remotes.secrets'),
+  });
+  knownHosts = makeKnownHosts({
+    filePath: path.join(app.getPath('userData'), 'known_hosts.json'),
+  });
+  connections = makeConnections({
+    Client: SshClient,
+    getProfile: (hk) => remoteProfile(hk),
+    getSecret: (hk) => secretStore.load(hk),
+    readKey: (p) => fs.readFileSync(p),
+    knownHosts,
+    confirmHostKey: (hk, fp, state) => confirmHostKey(hk, fp, state),
+    onStatus: (hk, status) => safeSend('remote:status', { hostKey: hk, status }),
+    agentFor: () => (process.platform === 'win32' ? 'pageant' : process.env.SSH_AUTH_SOCK || ''),
+  });
   registerMediaProtocol();
   // Remove o menu de aplicação padrão do Electron. A barra já fica escondida, mas os
   // ACELERADORES do menu padrão seguem ativos — e o Ctrl+V do "Edit → Paste" (role:
@@ -559,6 +614,72 @@ ipcMain.handle('projects:add', async () => {
   return { added };
 });
 
+// Cadastra/atualiza um projeto remoto. profile: { host, port, user, authType,
+// keyPath, remoteDir, label }. secret: senha ou passphrase (opcional).
+ipcMain.handle('remotes:add', (evt, { profile, secret }) => {
+  const port = parseInt(profile.port, 10) || 22;
+  const uri = buildSshUri({ user: profile.user, host: profile.host, port, remoteDir: profile.remoteDir });
+  const hk = hostKey(uri);
+  const c = loadConfig();
+  c.remotes = c.remotes || {};
+  c.remotes[hk] = {
+    host: profile.host, port, user: profile.user,
+    authType: profile.authType, keyPath: profile.keyPath || '',
+    remoteDir: profile.remoteDir || '/', label: profile.label || '',
+  };
+  if (!c.projects.includes(uri)) c.projects.push(uri);
+  saveConfig(c);
+  let secretSaved = true;
+  if (secret && (profile.authType === 'password' || profile.authType === 'key')) {
+    secretSaved = secretStore.save(hk, secret);
+  }
+  return { uri, hostKey: hk, secretSaved };
+});
+
+ipcMain.handle('ssh:configHosts', () => {
+  try {
+    const txt = fs.readFileSync(path.join(os.homedir(), '.ssh', 'config'), 'utf8');
+    return { hosts: parseSshConfig(txt) };
+  } catch { return { hosts: [] }; }
+});
+
+// Testa a conexão sem persistir: conecta, roda `pwd`, desconecta.
+ipcMain.handle('remote:test', (evt, { profile, secret }) => new Promise((resolve) => {
+  const conn = new SshClient();
+  let done = false;
+  const finish = (ok, message) => { if (done) return; done = true; try { conn.end(); } catch {} resolve({ ok, message }); };
+  const port = parseInt(profile.port, 10) || 22;
+  const hk = `${profile.user}@${profile.host}:${port}`;
+  const cfg = {
+    host: profile.host, port, username: profile.user,
+    readyTimeout: 10000,
+    hostVerifier: (keyBuf, verify) => {
+      const state = knownHosts.check(hk, keyBuf);
+      if (state === 'trusted') return verify(true);
+      Promise.resolve(confirmHostKey(hk, knownHosts.fingerprint(keyBuf), state))
+        .then((ok) => { if (ok) knownHosts.trust(hk, keyBuf); verify(!!ok); })
+        .catch(() => verify(false));
+    },
+  };
+  if (profile.authType === 'key') { try { cfg.privateKey = fs.readFileSync(profile.keyPath); } catch (e) { return finish(false, 'Chave: ' + e.message); } if (secret) cfg.passphrase = secret; }
+  else if (profile.authType === 'password') cfg.password = secret;
+  else if (profile.authType === 'agent') cfg.agent = process.platform === 'win32' ? 'pageant' : process.env.SSH_AUTH_SOCK || '';
+  conn.on('ready', () => conn.exec('pwd', (err, stream) => {
+    if (err) return finish(false, err.message);
+    let out = '';
+    stream.on('data', (d) => { out += d.toString(); });
+    stream.on('close', () => finish(true, 'Conectado — pwd: ' + out.trim()));
+  }));
+  conn.on('error', (err) => finish(false, err.message));
+  try { conn.connect(cfg); } catch (e) { finish(false, e.message); }
+}));
+
+ipcMain.handle('remote:reconnect', async (evt, { projectPath }) => {
+  if (!isRemote(projectPath)) return { ok: false };
+  try { await connections.reconnect(hostKey(projectPath)); return { ok: true }; }
+  catch (e) { return { ok: false, error: e.message }; }
+});
+
 // Remove um projeto da lista (não apaga nada do disco).
 ipcMain.handle('projects:remove', (evt, { projectPath }) => {
   const cfg = loadConfig();
@@ -569,6 +690,15 @@ ipcMain.handle('projects:remove', (evt, { projectPath }) => {
   }
   if (cfg.sessions) delete cfg.sessions[projectPath];
   if (cfg.projectMeta) delete cfg.projectMeta[projectPath];
+  if (isRemote(projectPath)) {
+    const hk = hostKey(projectPath);
+    try { connections.end(hk); } catch {}
+    try { secretStore.remove(hk); } catch {}
+    if (cfg.remotes) delete cfg.remotes[hk];
+    // mata o shell remoto do projeto, se houver
+    const sh = shells.get(projectPath);
+    if (sh) { try { sh.pty.kill(); } catch {} shells.delete(projectPath); }
+  }
   saveConfig(cfg);
   return { ok: true };
 });
@@ -647,8 +777,28 @@ ipcMain.handle('projects:list', () => {
   const cfg = loadConfig();
   const meta = cfg.projectMeta || {};
   // Preserva a ordem salva no config.json (definida pelo drag-and-drop do rail).
-  const existing = cfg.projects.filter((p) => { try { return fs.statSync(p).isDirectory(); } catch { return false; } });
+  const existing = cfg.projects.filter((p) => {
+    if (isRemote(p)) return true;
+    try { return fs.statSync(p).isDirectory(); } catch { return false; }
+  });
   const views = existing.map((p) => {
+    // Projeto remoto (SSH): nome do perfil, sem preview local, com status de conexão.
+    if (isRemote(p)) {
+      const hk = hostKey(p);
+      const prof = (cfg.remotes && cfg.remotes[hk]) || {};
+      const parsed = parseSshUri(p) || {};
+      return {
+        name: prof.label || `${parsed.user}@${parsed.host}`,
+        path: p,
+        hasPkg: false,
+        running: false,
+        previewType: null,
+        icon: null,
+        color: (cfg.projectMeta && cfg.projectMeta[p] && cfg.projectMeta[p].color) || null,
+        remote: true,
+        status: connections.status(hk),
+      };
+    }
     let hasPkg = false;
     try { fs.accessSync(path.join(p, 'package.json')); hasPkg = true; } catch {}
     const m = meta[p] || {};
@@ -660,10 +810,11 @@ ipcMain.handle('projects:list', () => {
       previewType: phpRuntime.detectProjectType(p),  // node|php|null (preview PHP puro)
       icon: m.icon || findFavicon(p),   // imagem escolhida à mão vence o favicon
       color: m.color || null,           // null → o rail usa colorFor(name)
+      remote: false,
     };
   });
-  // Reconcilia o layout (ordem + pastas) contra os projetos que realmente existem no
-  // disco. Auto-heal: se mudou, persiste — projeto cuja pasta sumiu cai fora do rail.
+  // Reconcilia o layout (ordem + pastas) contra os projetos que realmente existem
+  // (locais no disco + remotos). Auto-heal: se mudou, persiste.
   const rail = reconcileRail(cfg.rail, views.map((v) => v.path));
   if (JSON.stringify(rail) !== JSON.stringify(cfg.rail || [])) { cfg.rail = rail; saveConfig(cfg); }
   return { projects: views, rail };
@@ -1298,6 +1449,19 @@ function cleanEnv() {
   return env;
 }
 
+// Escolhe o transporte da sessão: node-pty local ou canal ssh2 remoto.
+async function makeTransport(projectPath, cols, rows) {
+  if (!isRemote(projectPath)) {
+    let pty;
+    try { pty = ptyLib || (ptyLib = require('node-pty')); }
+    catch (e) { throw new Error('node-pty não carregou: ' + e.message); }
+    return new LocalPty({ ptyLib: pty, shell: shellForOS(), env: cleanEnv(), cwd: projectPath, cols, rows });
+  }
+  const client = await connections.connFor(hostKey(projectPath)); // pode lançar (auth/conexão)
+  const { remoteDir } = parseSshUri(projectPath);
+  return new SshShell(client, { cols, rows, remoteDir });
+}
+
 // Onde o Claude Code guarda as configs globais (respeita CLAUDE_CONFIG_DIR).
 function claudeSettingsPath() {
   const base = process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude');
@@ -1504,34 +1668,29 @@ ipcMain.handle('lang:set', (evt, { lang }) => {
   return { ok: true };
 });
 
-ipcMain.handle('term:ensure', (evt, { sessionId, projectPath, cols, rows, theme }) => {
+ipcMain.handle('term:ensure', async (evt, { sessionId, projectPath, cols, rows, theme }) => {
   if (terminals.has(sessionId)) {
     return { existed: true, buffer: terminals.get(sessionId).buffer };
   }
-  let pty;
+  const remote = isRemote(projectPath);
+  let proc;
   try {
-    pty = ptyLib || (ptyLib = require('node-pty'));
+    proc = await makeTransport(projectPath, cols, rows);
   } catch (e) {
-    return { error: 'node-pty não carregou: ' + e.message };
+    return { error: e.message };
   }
-
-  const proc = pty.spawn(shellForOS(), [], {
-    name: 'xterm-256color',
-    cols: cols || 80,
-    rows: rows || 24,
-    cwd: projectPath,
-    env: cleanEnv(),
-  });
-  const launch = buildLaunchCommand(sessionId, projectPath);
-  const cli = launch.cli;
-  const entry = { pty: proc, buffer: '', projectPath, sessionId, cli };
+  // Local: resolve o comando de lançamento + a CLI da sessão (múltiplas IAs) de uma vez.
+  // Remoto (SSH, Camada 1): sobe o `claude` puro no VPS (título/resume remoto = Camada 4).
+  let launch = null;
+  let cli = 'claude';
+  if (!remote) { launch = buildLaunchCommand(sessionId, projectPath); cli = launch.cli; }
+  const entry = { pty: proc, buffer: '', projectPath, sessionId, cli, remote };
   terminals.set(sessionId, entry);
 
   proc.onData((data) => {
     entry.buffer += data;
     if (entry.buffer.length > 200000) entry.buffer = entry.buffer.slice(-150000);
-    captureResumeId(entry); // OpenCode/Antigravity/Codex: pesca o id da conversa do output
-    activityOnData(entry, data); // detecção "trabalhando/terminou" (só claude)
+    if (!remote) { captureResumeId(entry); activityOnData(entry, data); }
     safeSend('term:data', { sessionId, data });
   });
   proc.onExit(() => {
@@ -1542,17 +1701,20 @@ ipcMain.handle('term:ensure', (evt, { sessionId, projectPath, cols, rows, theme 
     safeSend('term:exit', { sessionId });
   });
 
-  // Casa o tema do Claude Code com o do terminal ANTES de subir o CLI, pra ele já
-  // nascer com as cores certas pro fundo (claro/escuro). Só faz sentido pro claude.
-  if (cli === 'claude' && theme) applyClaudeTheme(theme);
-
-  // Sobe o CLI de IA escolhido (Claude Code por padrão) automaticamente nessa sessão.
-  // Aba nova = `claude` puro; retoma a conversa só ao reabrir o app (id com histórico).
-  if (cli === 'claude') {
-    entry.claudeId = launch.claudeId || null;
-    startClaudeWatcher(entry, launch.capture); // captura id (se nova) + título da aba
+  if (remote) {
+    // Camada 1: sobe o claude puro no VPS; título/resume remoto ficam pra Camada 4.
+    proc.write('claude\r');
+  } else {
+    // Casa o tema do Claude Code com o do terminal ANTES de subir o CLI, pra ele já
+    // nascer com as cores certas pro fundo (claro/escuro). Só faz sentido pro claude.
+    if (cli === 'claude' && theme) applyClaudeTheme(theme);
+    // Aba nova = `claude` puro; retoma a conversa só ao reabrir o app (id com histórico).
+    if (cli === 'claude') {
+      entry.claudeId = launch.claudeId || null;
+      startClaudeWatcher(entry, launch.capture); // captura id (se nova) + título da aba
+    }
+    proc.write(launch.cmd + '\r');
   }
-  proc.write(launch.cmd + '\r');
   return { existed: false, buffer: '' };
 });
 
@@ -1572,24 +1734,16 @@ ipcMain.on('term:resize', (evt, { sessionId, cols, rows }) => {
 
 // ---------- Terminal livre (shell comum p/ npm, instalar skills, etc.) ----------
 // Igual ao do Claude Code, mas NÃO sobe o `claude` — abre só o shell no projeto.
-ipcMain.handle('shell:ensure', (evt, { projectPath, cols, rows }) => {
+ipcMain.handle('shell:ensure', async (evt, { projectPath, cols, rows }) => {
   if (shells.has(projectPath)) {
     return { existed: true, buffer: shells.get(projectPath).buffer };
   }
-  let pty;
+  let proc;
   try {
-    pty = ptyLib || (ptyLib = require('node-pty'));
+    proc = await makeTransport(projectPath, cols, rows);
   } catch (e) {
-    return { error: 'node-pty não carregou: ' + e.message };
+    return { error: e.message };
   }
-
-  const proc = pty.spawn(shellForOS(), [], {
-    name: 'xterm-256color',
-    cols: cols || 80,
-    rows: rows || 24,
-    cwd: projectPath,
-    env: cleanEnv(),
-  });
   const entry = { pty: proc, buffer: '' };
   shells.set(projectPath, entry);
 

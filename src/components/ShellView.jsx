@@ -76,7 +76,13 @@ export function ShellView({ activeProject, visible, onOpenUrl }) {
     });
     window.api.on('shell:exit', ({ projectPath }) => {
       const t = termsRef.current.get(projectPath);
-      if (t) t.term.write('\r\n\x1b[90m[sessão encerrada]\x1b[0m\r\n');
+      if (!t) return;
+      if (projectPath.startsWith('ssh://')) {
+        t.term.write('\r\n\x1b[90m[conexão perdida] — pressione Enter para reconectar\x1b[0m\r\n');
+        t.awaitingReconnect = true;
+      } else {
+        t.term.write('\r\n\x1b[90m[sessão encerrada]\x1b[0m\r\n');
+      }
     });
   }, []);
 
@@ -141,7 +147,24 @@ export function ShellView({ activeProject, visible, onOpenUrl }) {
         webgl.onContextLoss(() => { try { webgl.dispose(); } catch {} });
         term.loadAddon(webgl);
       } catch {}
-      term.onData((d) => window.api.shellInput(activeProject, d));
+      term.onData((d) => {
+        const t = termsRef.current.get(activeProject);
+        if (t && t.awaitingReconnect) {
+          if (d === '\r') {
+            t.awaitingReconnect = false;
+            t.term.write('\r\n\x1b[90m[reconectando…]\x1b[0m\r\n');
+            window.api.reconnectRemote(activeProject).then((r) => {
+              if (r && r.ok === false) { t.term.write('\r\n\x1b[31m[' + (r.error || 'reconexão falhou') + ']\x1b[0m\r\n'); return; }
+              window.api.shellEnsure(activeProject, t.term.cols, t.term.rows).then((res) => {
+                if (res && res.error) t.term.write('\r\n\x1b[31m[' + res.error + ']\x1b[0m\r\n');
+                else if (res && res.buffer) t.term.write(res.buffer);
+              });
+            });
+          }
+          return; // engole o input enquanto aguarda o Enter de reconexão
+        }
+        window.api.shellInput(activeProject, d);
+      });
 
       t = { term, fit, el, lastCols: 0, lastRows: 0 };
       termsRef.current.set(activeProject, t);
