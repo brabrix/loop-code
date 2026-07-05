@@ -57,7 +57,9 @@ function makeRemoteFs({ getSftp, isBinaryExt }) {
   function writeFile(uri, content) {
     return wrap(async () => {
       const sftp = await sftpOf(uri);
-      await call((cb) => sftp.writeFile(remotePathOf(uri), Buffer.from(content, 'utf8'), cb));
+      // Texto (string) vira utf8; Buffer (upload de arquivo binário) vai como está.
+      const data = Buffer.isBuffer(content) ? content : Buffer.from(content, 'utf8');
+      await call((cb) => sftp.writeFile(remotePathOf(uri), data, cb));
       return { ok: true };
     });
   }

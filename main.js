@@ -1488,7 +1488,20 @@ function uniqueDest(destDir, base) {
 }
 
 // Paste: move (cut) ou copia (copy) o item para uma pasta de destino.
-ipcMain.handle('fs:paste', (evt, { srcPath, destDir, move }) => {
+ipcMain.handle('fs:paste', async (evt, { srcPath, destDir, move }) => {
+  // UPLOAD: arquivo LOCAL solto numa pasta REMOTA -> envia via SFTP. (Origem remota ou
+  // pasta ficam pra depois; aqui é só o "arrastar um arquivo do PC pra dentro".)
+  if (isRemote(destDir) && !isRemote(srcPath)) {
+    try {
+      const st = fs.statSync(srcPath);
+      if (st.isDirectory()) return { error: 'enviar pasta pro remoto ainda não é suportado' };
+      const buf = fs.readFileSync(srcPath);
+      const pr = parseSshUri(destDir);
+      const childUri = buildSshUri({ user: pr.user, host: pr.host, port: pr.port, remoteDir: path.posix.join(pr.remoteDir, path.basename(srcPath)) });
+      const r = await remoteFs.writeFile(childUri, buf); // writeFile aceita Buffer (binário ok)
+      return r && r.error ? r : { ok: true, path: childUri };
+    } catch (err) { return { error: String(err) }; }
+  }
   try {
     if (!fs.existsSync(srcPath)) return { error: 'origem não existe' };
     const base = path.basename(srcPath);
