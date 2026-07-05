@@ -1337,6 +1337,7 @@ ipcMain.handle('csv:grid', async (evt, { filePath }) => {
 });
 
 ipcMain.handle('fs:write', (evt, { filePath, content }) => {
+  if (isRemote(filePath)) return remoteFs.writeFile(filePath, content);
   try { fs.writeFileSync(filePath, content, 'utf8'); return { ok: true }; }
   catch (err) { return { error: String(err) }; }
 });
@@ -1378,11 +1379,13 @@ ipcMain.handle('fs:reveal', (evt, { targetPath }) => {
 
 // Delete = manda pra Lixeira (reversível), nunca apaga de vez.
 ipcMain.handle('fs:trash', async (evt, { targetPath }) => {
+  if (isRemote(targetPath)) return remoteFs.remove(targetPath);
   try { await shell.trashItem(targetPath); return { ok: true }; }
   catch (err) { return { error: String(err) }; }
 });
 
 ipcMain.handle('fs:rename', (evt, { targetPath, newName }) => {
+  if (isRemote(targetPath)) return remoteFs.rename(targetPath, newName);
   try {
     const name = String(newName || '').trim();
     if (!name || name.includes('/') || name.includes('\\')) return { error: 'nome inválido' };
@@ -1396,6 +1399,13 @@ ipcMain.handle('fs:rename', (evt, { targetPath, newName }) => {
 // Cria um arquivo vazio ou uma pasta dentro de `destDir`. Usado pelo "Novo arquivo /
 // Nova pasta" do menu de contexto da árvore.
 ipcMain.handle('fs:create', (evt, { destDir, name, isDir }) => {
+  if (isRemote(destDir)) {
+    const clean = String(name || '').trim();
+    if (!clean || clean.includes('/') || clean.includes('\\')) return { error: 'nome inválido' };
+    const pr = parseSshUri(destDir);
+    const childUri = buildSshUri({ user: pr.user, host: pr.host, port: pr.port, remoteDir: require('path').posix.join(pr.remoteDir, clean) });
+    return isDir ? remoteFs.mkdir(childUri) : remoteFs.createFile(childUri);
+  }
   try {
     const clean = String(name || '').trim();
     if (!clean || clean.includes('/') || clean.includes('\\')) return { error: 'nome inválido' };
