@@ -14,6 +14,8 @@ const {
   PHP_ZIP_NAME,
   PHP_DOWNLOAD_URLS,
   PHP_SHA256,
+  phpBinaryName,
+  phpAssetFor,
 } = require('../php-runtime.cjs');
 
 function assert(cond, msg) {
@@ -119,6 +121,27 @@ async function run() {
     'URLs terminam no zip fixado',
   );
   console.log('constantes ok');
+
+  // phpBinaryName
+  assert(phpBinaryName('win32') === 'php.exe', 'win -> php.exe');
+  assert(phpBinaryName('darwin') === 'php', 'mac -> php');
+  assert(phpBinaryName('linux') === 'php', 'linux -> php');
+
+  // phpAssetFor: win32 espelha as constantes atuais
+  const win = phpAssetFor('win32', 'x64');
+  assert(win && win.name === PHP_ZIP_NAME, 'asset win = PHP_ZIP_NAME');
+  assert(win.sha256 === PHP_SHA256, 'asset win sha = PHP_SHA256');
+
+  // phpAssetFor: darwin por arch
+  const macArm = phpAssetFor('darwin', 'arm64');
+  assert(macArm && /aarch64/.test(macArm.name), 'darwin arm64 -> aarch64');
+  assert(
+    macArm.urls.every((u) => u.endsWith(macArm.name)),
+    'urls darwin terminam no asset',
+  );
+  const macIntel = phpAssetFor('darwin', 'x64');
+  assert(macIntel && /x86_64/.test(macIntel.name), 'darwin x64 -> x86_64');
+  console.log('phpBinaryName/phpAssetFor ok');
 
   console.log('\nphp-smoke OK');
 }
