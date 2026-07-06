@@ -65,12 +65,45 @@ async function fixLoginPath(platform = process.platform) {
   }
 }
 
+// Template de menu nativo do macOS. Sem ele (setApplicationMenu(null)), o mac perde
+// Cmd+Q/C/V/H e a edição nativa. Só roles padrão — o Electron traduz p/ os itens do SO.
+function macMenuTemplate(appName) {
+  return [
+    {
+      label: appName,
+      submenu: [
+        { role: 'about' },
+        { type: 'separator' },
+        { role: 'hide' },
+        { role: 'hideOthers' },
+        { role: 'unhide' },
+        { type: 'separator' },
+        { role: 'quit' },
+      ],
+    },
+    {
+      label: 'Edit',
+      submenu: [
+        { role: 'undo' },
+        { role: 'redo' },
+        { type: 'separator' },
+        { role: 'cut' },
+        { role: 'copy' },
+        { role: 'paste' },
+        { role: 'selectAll' },
+      ],
+    },
+    { role: 'window', submenu: [{ role: 'minimize' }, { role: 'close' }] },
+  ];
+}
+
 module.exports = {
   TABLE,
   tableFor,
   shellFor,
   loginArgsFor,
   fixLoginPath,
+  macMenuTemplate,
   isWin,
   isMac,
   isLinux,

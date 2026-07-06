@@ -376,13 +376,24 @@ app.whenReady().then(async () => {
   // DOIS eventos 'paste' no terminal = texto colado em dobro (visível no .exe). Sem o
   // menu, sobra um único caminho de colagem. O copiar/colar normal dos inputs continua
   // pelo navegador, e o menu de contexto do preview é montado à parte (não depende deste).
-  Menu.setApplicationMenu(null);
+  // Windows: sem menu (evita o paste duplo no terminal — ver comentário acima).
+  // macOS: menu nativo (Cmd+Q/C/V/H) — sem ele o app fica sem atalhos essenciais.
+  if (platform.isMac) {
+    Menu.setApplicationMenu(Menu.buildFromTemplate(platform.macMenuTemplate(APP_NAME)));
+  } else {
+    Menu.setApplicationMenu(null);
+  }
   createWindow();
 });
 
 app.on('window-all-closed', () => {
   cleanup();
   if (process.platform !== 'darwin') app.quit();
+});
+
+// macOS: clicar no ícone do dock com nenhuma janela aberta recria a janela.
+app.on('activate', () => {
+  if (BrowserWindow.getAllWindows().length === 0) createWindow();
 });
 
 // Dá ao preview (webview) cara de navegador: DevTools no F12 e menu de botão direito.
