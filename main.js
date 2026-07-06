@@ -388,7 +388,7 @@ app.whenReady().then(async () => {
 
 app.on('window-all-closed', () => {
   cleanup();
-  if (process.platform !== 'darwin') app.quit();
+  if (!platform.isMac) app.quit();
 });
 
 // macOS: clicar no ícone do dock com nenhuma janela aberta recria a janela.
