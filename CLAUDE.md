@@ -20,20 +20,23 @@ com chat e preview lado a lado. Usa a assinatura do Claude, nunca a API.
 
 ## DIFERENÇAS DE PLATAFORMA (Win/Mac/Linux)
 
-Nunca espalhe `process.platform` pelo código. Diferença de SO vai em `platform.cjs`
+Os módulos do processo main moram em `electron/` (ex.: `electron/platform.cjs`,
+`electron/php-runtime.cjs`, `electron/remote/`); só `main.js` e `preload.js` ficam na raiz.
+
+Nunca espalhe `process.platform` pelo código. Diferença de SO vai em `electron/platform.cjs`
 (módulo canônico, estilo `platform.ts` do VS Code):
 
 - É um **valor** (nome de shell, extensão de binário, comando de "abrir", URL de asset)?
-  → vira chave na tabela `TABLE` de `platform.cjs`. Adicionar suporte a um SO = preencher
+  → vira chave na tabela `TABLE` de `electron/platform.cjs`. Adicionar suporte a um SO = preencher
   a coluna dele.
 - É **comportamento** (resolver PATH, montar menu, escolher login shell)? → vira uma
-  função em `platform.cjs` que aceita `platform` como parâmetro (default `process.platform`),
+  função em `electron/platform.cjs` que aceita `platform` como parâmetro (default `process.platform`),
   para ser testável em qualquer SO via `scripts/platform-smoke.cjs`.
 - Comportamento que precisa de `fs`/`child_process` (ex.: download/extração por SO) mora
-  no módulo que já tem Node (ex.: `php-runtime.cjs`), ramificando por `process.platform`,
+  no módulo que já tem Node (ex.: `electron/php-runtime.cjs`), ramificando por `process.platform`,
   mas com as partes de decisão (asset, nome de binário) como funções puras testáveis.
 
-Regra de ouro: se você escreveu `process.platform === '...'` fora de `platform.cjs`,
+Regra de ouro: se você escreveu `process.platform === '...'` fora de `electron/platform.cjs`,
 provavelmente há um lugar melhor. O caminho Windows nunca deve regredir ao adicionar Mac/Linux.
 
 ## AUTO-APRENDIZADO
