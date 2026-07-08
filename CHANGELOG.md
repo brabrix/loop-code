@@ -3,6 +3,23 @@
 Notas de versão do Carcará Code. As versões seguem versionamento semântico
 (`MAJOR.MINOR.PATCH`), da mais nova para a mais antiga.
 
+## [0.1.7] — 2026-07-08
+
+### Features
+
+- macOS: suporte a build (`dmg` universal) e camada de plataforma canônica — login shell no pty e `fix-path` no boot pra herdar o PATH, menu nativo e reabrir janela pelo dock, runtime PHP aditivo (Windows intacto)
+- Preview: mostra o favicon da página nas abas do WebView (cai no globo se faltar)
+
+### Fixes
+
+- Terminal: o PTY passa a adotar a grade do xterm recriado (reload/janela nova) — some o conteúdo cortado/empurrado pra baixo em janela estreita (PR #9)
+- Código: abas isoladas por projeto (não vazam entre projetos)
+- Terminal: soltar um arquivo cola o caminho (drag-and-drop com `copyMove`)
+
+### Interno
+
+- Módulos do processo main reorganizados em `electron/`; raiz enxuta
+
 ## [0.1.5] — 2026-07-01
 
 ### Features
