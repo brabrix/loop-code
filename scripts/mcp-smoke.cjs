@@ -12,7 +12,7 @@ const {
   mcpUnsubscribeResource,
   mcpComplete,
   mcpSetRoots,
-} = require('../mcp-core.cjs');
+} = require('../electron/mcp-core.cjs');
 
 function assert(cond, msg) {
   if (!cond) throw new Error('ASSERT: ' + msg);

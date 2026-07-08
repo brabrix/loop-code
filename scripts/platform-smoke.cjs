@@ -7,7 +7,7 @@ const {
   isWin,
   isMac,
   isLinux,
-} = require('../platform.cjs');
+} = require('../electron/platform.cjs');
 
 function assert(cond, msg) {
   if (!cond) throw new Error('ASSERT: ' + msg);
@@ -42,7 +42,7 @@ assert(isMac === (process.platform === 'darwin'), 'isMac');
 assert(isLinux === (process.platform === 'linux'), 'isLinux');
 
 // macMenuTemplate: forma mínima esperada
-const { macMenuTemplate } = require('../platform.cjs');
+const { macMenuTemplate } = require('../electron/platform.cjs');
 const tpl = macMenuTemplate('Carcará Code');
 assert(Array.isArray(tpl) && tpl.length >= 2, 'template é array com >=2 menus');
 assert(tpl[0].label === 'Carcará Code', 'primeiro menu = nome do app');
@@ -51,7 +51,7 @@ assert(roles.includes('"quit"'), 'tem role quit (Cmd+Q)');
 assert(roles.includes('"copy"') && roles.includes('"paste"'), 'tem copy/paste no Edit');
 
 // fixLoginPath é no-op seguro fora de darwin/linux (não lança, retorna false)
-const { fixLoginPath } = require('../platform.cjs');
+const { fixLoginPath } = require('../electron/platform.cjs');
 (async () => {
   const r = await fixLoginPath('win32');
   assert(r === false, 'fixLoginPath no-op em win32 -> false');

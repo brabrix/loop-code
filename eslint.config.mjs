@@ -78,7 +78,6 @@ export default [
       'vite.config.mjs',
       '**/*.test.mjs',
       '**/*.test.js',
-      'updater.test.mjs',
       'test/**/*.mjs',
     ],
     languageOptions: {

@@ -29,7 +29,7 @@ function compare(label, a, b) {
 }
 
 compare('renderer', pt, en);
-const native = require('../main.i18n.cjs');
+const native = require('../electron/main.i18n.cjs');
 compare('native', native.pt, native.en);
 
 if (fail) {

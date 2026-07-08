@@ -20,25 +20,25 @@ const { Readable } = require('stream');
 const crypto = require('crypto');
 const http = require('http');
 const detectPort = require('detect-port');
-const mcpCore = require('./mcp-core.cjs');
-const mcpOauth = require('./mcp-oauth.cjs');
-const mediaCore = require('./media-core.cjs');
-const claudeSessions = require('./claude-sessions.cjs');
-const aiCli = require('./ai-cli.cjs');
-const chatCli = require('./chat-cli.cjs');
-const todosCore = require('./claude-todos-core.cjs');
-const { initUpdater } = require('./updater.cjs');
-const phpRuntime = require('./php-runtime.cjs');
-const { reconcile: reconcileRail } = require('./rail-core.cjs');
-const { LocalPty } = require('./remote/localPty.cjs');
-const platform = require('./platform.cjs');
-const { isRemote, parseSshUri, buildSshUri, hostKey } = require('./remote/sshUri.cjs');
-const { parseSshConfig } = require('./remote/sshConfig.cjs');
-const { SshShell } = require('./remote/sshShell.cjs');
-const { makeSecretStore } = require('./remote/secretStore.cjs');
-const { makeKnownHosts } = require('./remote/knownHosts.cjs');
-const { makeConnections } = require('./remote/connections.cjs');
-const { makeRemoteFs } = require('./remote/remoteFs.cjs');
+const mcpCore = require('./electron/mcp-core.cjs');
+const mcpOauth = require('./electron/mcp-oauth.cjs');
+const mediaCore = require('./electron/media-core.cjs');
+const claudeSessions = require('./electron/claude-sessions.cjs');
+const aiCli = require('./electron/ai-cli.cjs');
+const chatCli = require('./electron/chat-cli.cjs');
+const todosCore = require('./electron/claude-todos-core.cjs');
+const { initUpdater } = require('./electron/updater.cjs');
+const phpRuntime = require('./electron/php-runtime.cjs');
+const { reconcile: reconcileRail } = require('./electron/rail-core.cjs');
+const { LocalPty } = require('./electron/remote/localPty.cjs');
+const platform = require('./electron/platform.cjs');
+const { isRemote, parseSshUri, buildSshUri, hostKey } = require('./electron/remote/sshUri.cjs');
+const { parseSshConfig } = require('./electron/remote/sshConfig.cjs');
+const { SshShell } = require('./electron/remote/sshShell.cjs');
+const { makeSecretStore } = require('./electron/remote/secretStore.cjs');
+const { makeKnownHosts } = require('./electron/remote/knownHosts.cjs');
+const { makeConnections } = require('./electron/remote/connections.cjs');
+const { makeRemoteFs } = require('./electron/remote/remoteFs.cjs');
 const { Client: SshClient } = require('ssh2');
 
 let mainWindow;
@@ -144,7 +144,7 @@ function confirmHostKey(hk, fingerprint, state) {
     .then((r) => r.response === 0);
 }
 
-const NATIVE_STRINGS = require('./main.i18n.cjs');
+const NATIVE_STRINGS = require('./electron/main.i18n.cjs');
 
 // Idioma do processo main: config.json > idioma do sistema > 'pt'.
 function currentLang() {
@@ -1613,7 +1613,7 @@ function parseXlsLegacy(filePath, mtimeMs) {
 // demanda pelo mesmo sliceXlsRows. O parse (encoding + SheetJS raw) mora no csv-core,
 // compartilhado com o smoke (scripts/csv-smoke.cjs).
 function parseCsv(filePath, mtimeMs) {
-  const { parseCsvBuffer } = require('./csv-core.cjs');
+  const { parseCsvBuffer } = require('./electron/csv-core.cjs');
   const wb = parseCsvBuffer(fs.readFileSync(filePath));
   const name = wb.SheetNames[0];
   const ws = name ? wb.Sheets[name] : null;

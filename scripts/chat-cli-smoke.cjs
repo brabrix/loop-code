@@ -11,7 +11,7 @@ const {
   normalizeStreamEvent,
   normalizeCodexEvent,
   getAdapter,
-} = require('../chat-cli.cjs');
+} = require('../electron/chat-cli.cjs');
 
 let n = 0;
 const ok = (cond, msg) => {

@@ -1,6 +1,6 @@
 // Smoke da reconciliação do Rail fora do Electron. Usa o MESMO rail-core.cjs do main.js.
 // Uso: node scripts/rail-smoke.cjs
-const { reconcile } = require('../rail-core.cjs');
+const { reconcile } = require('../electron/rail-core.cjs');
 
 let fail = 0;
 function assert(cond, msg) {

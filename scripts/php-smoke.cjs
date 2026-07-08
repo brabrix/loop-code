@@ -16,7 +16,7 @@ const {
   PHP_SHA256,
   phpBinaryName,
   phpAssetFor,
-} = require('../php-runtime.cjs');
+} = require('../electron/php-runtime.cjs');
 
 function assert(cond, msg) {
   if (!cond) throw new Error('ASSERT: ' + msg);

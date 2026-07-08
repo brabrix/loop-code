@@ -1,5 +1,5 @@
 // Smoke do LocalPty: confirma que shell e shellArgs chegam ao ptyLib.
-const { LocalPty } = require('../remote/localPty.cjs');
+const { LocalPty } = require('../electron/remote/localPty.cjs');
 
 function assert(cond, msg) {
   if (!cond) throw new Error('ASSERT: ' + msg);

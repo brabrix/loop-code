@@ -22,6 +22,15 @@ mouse-debug.log
 .superpowers/
 docs/superpowers/
 
+# Docs de trabalho / planejamento — internos, ficam só no disco local
+CARCARA-CODE-AI-SPEC.md
+CHAT-UI-PLAN.md
+DESAFIOS.md
+tarefas.md
+
+# Logos soltos na raiz (sobras; o app usa src/assets/logo-*.svg e build/icon.*)
+/logo*.svg
+
 # OS / editor
 .DS_Store
 Thumbs.db
