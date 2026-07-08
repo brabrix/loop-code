@@ -340,6 +340,9 @@
     "back": "Back",
     "forward": "Forward",
     "reload": "Reload page",
+    "reload_hard": "Hard reload (ignore cache)",
+    "capture_failed": "Couldn't capture the preview",
+    "copy_image_failed": "Couldn't copy the image",
     "url_placeholder": "Preview",
     "open_browser": "Open in default browser",
     "find_placeholder": "Find in page",
@@ -383,6 +386,16 @@
     "claude_prompt_6": "3. Make sure it listens on http://localhost on an accessible port.",
     "claude_prompt_7": "",
     "claude_prompt_8": "Tell me what was missing and fix it."
+  },
+  "annotator": {
+    "pen": "Pen",
+    "rect": "Rectangle",
+    "arrow": "Arrow",
+    "text": "Text",
+    "undo": "Undo",
+    "cancel": "Cancel",
+    "copy": "Copy",
+    "textPlaceholder": "Text"
   },
   "mcp": {
     "panel": {

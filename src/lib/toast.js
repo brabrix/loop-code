@@ -3,6 +3,10 @@
 // sem precisar de Context nem prop-drilling. O <Toaster /> (montado uma vez no
 // App) assina e renderiza a pilha. É assim que "avisos do sistema" (git, preview,
 // código…) passam a falar a mesma língua em vez de cada painel inventar a sua.
+//
+// Módulo puro (não é componente React) — usa o tradutor ESTÁTICO (lê localStorage
+// direto), o mesmo padrão do ErrorBoundary, em vez do hook useT().
+import { tStatic } from '@/lib/i18n';
 
 const listeners = new Set();
 let counter = 0;
@@ -29,7 +33,7 @@ export function toast(message, opts = {}) {
   let action = opts.action;
   if (opts.copyable && !action) {
     action = {
-      label: 'Copiar',
+      label: tStatic('annotator.copy'),
       onClick: () => {
         const text = String(message);
         if (typeof window !== 'undefined' && window.api?.copyText) window.api.copyText(text);

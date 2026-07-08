@@ -340,6 +340,9 @@
     "back": "Voltar",
     "forward": "Avançar",
     "reload": "Recarregar página",
+    "reload_hard": "Recarregar ignorando cache (hard reload)",
+    "capture_failed": "Não consegui capturar o preview",
+    "copy_image_failed": "Não consegui copiar a imagem",
     "url_placeholder": "Preview",
     "open_browser": "Abrir no navegador padrão",
     "find_placeholder": "Buscar na página",
@@ -383,6 +386,16 @@
     "claude_prompt_6": "3. Garanta que ele escuta em http://localhost numa porta acessivel.",
     "claude_prompt_7": "",
     "claude_prompt_8": "Me diga o que estava faltando e corrija."
+  },
+  "annotator": {
+    "pen": "Caneta",
+    "rect": "Retângulo",
+    "arrow": "Seta",
+    "text": "Texto",
+    "undo": "Desfazer",
+    "cancel": "Cancelar",
+    "copy": "Copiar",
+    "textPlaceholder": "Texto"
   },
   "mcp": {
     "panel": {

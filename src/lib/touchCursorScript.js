@@ -35,6 +35,12 @@ export const INJECT = `(() => {
     dot.style.top = e.clientY + 'px';
   }
 
+  // Ponteiro saiu da página (foco foi pra outra janela/iframe/barra do app): some
+  // com a bolinha, senão ela fica "grudada" na última posição fora da área visível.
+  function leave(){
+    dot.style.display = 'none';
+  }
+
   function tap(e){
     var r = document.createElement('div');
     r.className = '__carcara-touch-ripple';
@@ -68,6 +74,7 @@ export const INJECT = `(() => {
     // Observadores passivos e não-capturantes: só olham, nunca bloqueiam o site.
     document.removeEventListener('mousemove', move);
     document.removeEventListener('pointerdown', tap);
+    document.removeEventListener('mouseleave', leave);
     document.documentElement.style.cursor = prevCursor;
     for (var i = 0; i < ripples.length; i++) { try { ripples[i].remove(); } catch (e) {} }
     ripples = [];
@@ -77,6 +84,10 @@ export const INJECT = `(() => {
 
   document.addEventListener('mousemove', move, { passive: true });
   document.addEventListener('pointerdown', tap, { passive: true });
+  // mouseleave em document (não bubbla, mas dispara quando o ponteiro sai da
+  // página inteira) — diferente de documentElement, que dispararia a cada saída
+  // de um elemento filho.
+  document.addEventListener('mouseleave', leave, { passive: true });
   window.__carcaraTouch = { teardown: teardown };
 })();`;
 

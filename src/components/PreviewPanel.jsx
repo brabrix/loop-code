@@ -429,6 +429,8 @@ export function PreviewPanel({
   const [findNonce, setFindNonce] = useState(0); // bump a cada Ctrl+F: re-foca o input da busca
   const [shooting, setShooting] = useState(false); // modo "print do preview" ativo
   const [shot, setShot] = useState(null); // dataURL da captura crua → abre o anotador
+  const shotRef = useRef(shot); // leitura síncrona dentro do listener de F5/hard-reload (deps [])
+  shotRef.current = shot;
   const [shotDone, setShotDone] = useState(false); // toast "Print copiado!"
   const [shotRect, setShotRect] = useState(null); // rubber-band do arraste (coords do overlay), null quando não arrastando
   const shootStartRef = useRef(null); // { cx, cy } início do arraste (coords de tela)
@@ -846,9 +848,9 @@ export function PreviewPanel({
       if (id == null) return;
       const res = await window.api.capturePreview(id, rect, { toClipboard: false });
       if (res && res.dataURL) setShot(res.dataURL);
-      else toast.error('Não consegui capturar o preview');
+      else toast.error(t('preview.capture_failed'));
     },
-    [active],
+    [active, t],
   );
 
   // Menu da câmera: "Selecionar área" entra no modo recorte; "Tela toda" captura na hora.
@@ -1402,6 +1404,7 @@ export function PreviewPanel({
   useEffect(() => {
     const onKey = (e) => {
       if (!inWebRef.current) return;
+      if (shotRef.current) return; // anotador aberto por cima: não recarrega o webview escondido
       const key = e.key;
       const hard =
         (e.ctrlKey && key === 'F5') ||
@@ -1622,9 +1625,7 @@ export function PreviewPanel({
                   type="button"
                   onClick={reload}
                   disabled={mode !== 'web'}
-                  title={
-                    ctrlHeld ? 'Recarregar ignorando cache (hard reload)' : t('preview.reload')
-                  }
+                  title={ctrlHeld ? t('preview.reload_hard') : t('preview.reload')}
                   className={cn(
                     'absolute left-1 top-1/2 grid h-6 w-6 -translate-y-1/2 place-items-center rounded transition-colors hover:bg-muted disabled:pointer-events-none disabled:opacity-40 [&_svg]:size-[14px]',
                     ctrlHeld ? 'text-primary' : 'text-muted-foreground hover:text-foreground',
@@ -1808,7 +1809,7 @@ export function PreviewPanel({
                     setShotDone(true);
                     setTimeout(() => setShotDone(false), 2200);
                   } else {
-                    toast.error('Não consegui copiar a imagem');
+                    toast.error(t('preview.copy_image_failed'));
                   }
                 }}
               />

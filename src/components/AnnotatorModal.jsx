@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Pencil, ArrowUpRight, Square, Type, Undo2, Copy, X } from 'lucide-react';
 import * as fabric from 'fabric';
 import { cn } from '@/lib/utils';
+import { useT } from '@/lib/i18n';
 
 // Anotador do print: fica ENTRE a captura e o clipboard. Recebe a dataURL da captura
 // crua (webContents.capturePage), deixa marcar por cima (caneta/retângulo/seta/texto)
@@ -13,17 +14,20 @@ const PALETTE = ['#f2792b', '#ef4444', '#22c55e', '#3b82f6', '#eab308', '#ffffff
 const STROKE_W = 3;
 
 const TOOLS = [
-  { key: 'pen', Icon: Pencil, label: 'Caneta' },
-  { key: 'rect', Icon: Square, label: 'Retângulo' },
-  { key: 'arrow', Icon: ArrowUpRight, label: 'Seta' },
-  { key: 'text', Icon: Type, label: 'Texto' },
+  { key: 'pen', Icon: Pencil, labelKey: 'annotator.pen' },
+  { key: 'rect', Icon: Square, labelKey: 'annotator.rect' },
+  { key: 'arrow', Icon: ArrowUpRight, labelKey: 'annotator.arrow' },
+  { key: 'text', Icon: Type, labelKey: 'annotator.text' },
 ];
 
 export default function AnnotatorModal({ dataURL, onCopy, onClose }) {
+  const t = useT();
   const canvasElRef = useRef(null);
   const fabricRef = useRef(null);
   const toolRef = useRef('pen');
   const colorRef = useRef(PALETTE[0]);
+  const tRef = useRef(t); // leitura síncrona dentro do handler mouse:down (effect com deps [dataURL])
+  tRef.current = t;
   const [tool, setTool] = useState('pen');
   const [color, setColor] = useState(PALETTE[0]);
   const [ready, setReady] = useState(false);
@@ -57,7 +61,7 @@ export default function AnnotatorModal({ dataURL, onCopy, onClose }) {
         if (t === 'pen' || opt.target) return;
         const p = canvas.getScenePoint(opt.e);
         if (t === 'text') {
-          const text = new fabric.IText('Texto', {
+          const text = new fabric.IText(tRef.current('annotator.textPlaceholder'), {
             left: p.x,
             top: p.y,
             fill: colorRef.current,
@@ -239,11 +243,11 @@ export default function AnnotatorModal({ dataURL, onCopy, onClose }) {
       <div className="flex max-h-[92vh] max-w-[92vw] flex-col overflow-hidden rounded-lg border bg-card shadow-xl">
         {/* Toolbar */}
         <div className="flex flex-wrap items-center gap-2 border-b p-2">
-          {TOOLS.map(({ key, Icon, label }) => (
+          {TOOLS.map(({ key, Icon, labelKey }) => (
             <button
               key={key}
               type="button"
-              title={label}
+              title={t(labelKey)}
               onClick={() => setTool(key)}
               className={cn(
                 'grid h-8 w-8 place-items-center rounded-md border transition-colors',
@@ -278,7 +282,7 @@ export default function AnnotatorModal({ dataURL, onCopy, onClose }) {
 
           <button
             type="button"
-            title="Desfazer"
+            title={t('annotator.undo')}
             onClick={undo}
             className="grid h-8 w-8 place-items-center rounded-md border bg-background text-foreground hover:bg-muted"
           >
@@ -292,7 +296,7 @@ export default function AnnotatorModal({ dataURL, onCopy, onClose }) {
               className="inline-flex h-8 items-center gap-1.5 rounded-md border bg-background px-3 text-sm text-foreground hover:bg-muted"
             >
               <X className="h-4 w-4" />
-              Cancelar
+              {t('annotator.cancel')}
             </button>
             <button
               type="button"
@@ -301,7 +305,7 @@ export default function AnnotatorModal({ dataURL, onCopy, onClose }) {
               className="inline-flex h-8 items-center gap-1.5 rounded-md border border-primary/40 bg-primary px-3 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-60"
             >
               <Copy className="h-4 w-4" />
-              Copiar
+              {t('annotator.copy')}
             </button>
           </div>
         </div>
