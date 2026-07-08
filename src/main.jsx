@@ -3,6 +3,7 @@ import App from './App.jsx';
 import { ThemeProvider } from './lib/theme.jsx';
 import { LanguageProvider } from './lib/i18n.jsx';
 import { LayoutProvider } from './lib/layoutContext.jsx';
+import { ChatModeProvider } from './lib/chatModeContext.jsx';
 import { ErrorBoundary } from './components/ErrorBoundary.jsx';
 import './index.css';
 
@@ -14,9 +15,11 @@ createRoot(document.getElementById('root')).render(
   <ThemeProvider>
     <LanguageProvider>
       <LayoutProvider>
-        <ErrorBoundary label="Carcará Code">
-          <App />
-        </ErrorBoundary>
+        <ChatModeProvider>
+          <ErrorBoundary label="Carcará Code">
+            <App />
+          </ErrorBoundary>
+        </ChatModeProvider>
       </LayoutProvider>
     </LanguageProvider>
   </ThemeProvider>,

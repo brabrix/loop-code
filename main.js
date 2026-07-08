@@ -25,6 +25,7 @@ const mcpOauth = require('./mcp-oauth.cjs');
 const mediaCore = require('./media-core.cjs');
 const claudeSessions = require('./claude-sessions.cjs');
 const aiCli = require('./ai-cli.cjs');
+const chatCli = require('./chat-cli.cjs');
 const todosCore = require('./claude-todos-core.cjs');
 const { initUpdater } = require('./updater.cjs');
 const phpRuntime = require('./php-runtime.cjs');
@@ -2053,6 +2054,165 @@ function applyClaudeTheme(theme) {
   } catch {}
 }
 
+// ---------- Ponte de CHAT (assistant-ui ↔ CLIs de IA headless) ----------
+// ALTERNATIVA ao terminal. Cada IA tem um adapter em chat-cli.cjs (args + parser). Dois
+// modelos: 'persistent' (claude: 1 processo, stdin stream-json, vários turnos) e 'perTurn'
+// (codex/agy: 1 processo por mensagem). Eventos normalizados vão pro renderer via 'chat:event'.
+// cleanEnv() tira a chave de API e força a assinatura; shell:true no Windows resolve o
+// binário pelo PATH (mesmo esquema do system:checkTools). Additivo — não toca em term:*.
+const chatProcs = new Map(); // persistente: sessionId -> { proc, adapter, buf, alive }
+const chatResumeIds = new Map(); // sessionId -> id de retomada (claude session_id / codex thread_id)
+const chatTurnProcs = new Map(); // perTurn: sessionId -> processo do turno atual (p/ abort)
+const chatSeen = new Set(); // sessionId que já teve ≥1 turno (agy usa --continue)
+
+function chatSpawnOpts(projectPath, withStdin) {
+  return {
+    cwd: projectPath || process.cwd(),
+    env: cleanEnv(),
+    shell: process.platform === 'win32',
+    stdio: [withStdin ? 'pipe' : 'ignore', 'pipe', 'pipe'],
+    windowsHide: true,
+  };
+}
+
+// Repassa as linhas já parseadas pro renderer, capturando o id de retomada quando aparece.
+function emitChatLines(sessionId, adapter, lines) {
+  for (const line of lines) {
+    const s = line.trim();
+    if (!s) continue;
+    for (const ev of adapter.parseLine(s)) {
+      if (ev.sessionId && chatResumeIds.get(sessionId) !== ev.sessionId) {
+        chatResumeIds.set(sessionId, ev.sessionId);
+      }
+      safeSend('chat:event', { sessionId, event: ev });
+    }
+  }
+}
+
+// --- Persistente (claude): 1 processo, stdin aberto ---
+function spawnPersistentChat(sessionId, projectPath, adapter) {
+  const resumeId = chatResumeIds.get(sessionId) || null;
+  const proc = spawn(
+    adapter.bin,
+    adapter.buildArgs({ resumeId }),
+    chatSpawnOpts(projectPath, true),
+  );
+  const entry = { proc, adapter, buf: '', alive: true };
+  chatProcs.set(sessionId, entry);
+  proc.stdout.on('data', (chunk) => {
+    entry.buf += chunk.toString();
+    const lines = entry.buf.split('\n');
+    entry.buf = lines.pop() || '';
+    emitChatLines(sessionId, adapter, lines);
+  });
+  proc.stderr.on('data', (c) =>
+    safeSend('chat:event', { sessionId, event: { kind: 'stderr', text: c.toString() } }),
+  );
+  proc.on('error', (err) => {
+    entry.alive = false;
+    safeSend('chat:event', {
+      sessionId,
+      event: { kind: 'error', text: String((err && err.message) || err) },
+    });
+  });
+  proc.on('close', (code) => {
+    entry.alive = false;
+    if (chatProcs.get(sessionId) === entry) chatProcs.delete(sessionId);
+    safeSend('chat:event', { sessionId, event: { kind: 'exit', code } });
+  });
+  return entry;
+}
+
+function ensurePersistentChat(sessionId, projectPath, adapter) {
+  const cur = chatProcs.get(sessionId);
+  if (cur && cur.alive) return cur;
+  return spawnPersistentChat(sessionId, projectPath, adapter);
+}
+
+// --- Por turno (codex/agy): 1 processo por mensagem ---
+function runChatTurn(sessionId, projectPath, adapter, text) {
+  const resumeId = chatResumeIds.get(sessionId) || null;
+  const args = adapter.buildArgs({ resumeId, prompt: text, hasHistory: chatSeen.has(sessionId) });
+  const proc = spawn(adapter.bin, args, chatSpawnOpts(projectPath, false));
+  chatTurnProcs.set(sessionId, proc);
+  let buf = '';
+  proc.stdout.on('data', (chunk) => {
+    const s = chunk.toString();
+    if (adapter.text) {
+      safeSend('chat:event', { sessionId, event: { kind: 'text', text: s } }); // texto puro (agy)
+    } else {
+      buf += s;
+      const lines = buf.split('\n');
+      buf = lines.pop() || '';
+      emitChatLines(sessionId, adapter, lines);
+    }
+  });
+  proc.stderr.on('data', (c) =>
+    safeSend('chat:event', { sessionId, event: { kind: 'stderr', text: c.toString() } }),
+  );
+  proc.on('error', (err) => {
+    if (chatTurnProcs.get(sessionId) === proc) chatTurnProcs.delete(sessionId);
+    safeSend('chat:event', {
+      sessionId,
+      event: { kind: 'error', text: String((err && err.message) || err) },
+    });
+  });
+  proc.on('close', (code) => {
+    if (!adapter.text && buf.trim()) emitChatLines(sessionId, adapter, [buf]); // última linha
+    if (chatTurnProcs.get(sessionId) === proc) chatTurnProcs.delete(sessionId);
+    chatSeen.add(sessionId);
+    safeSend('chat:event', { sessionId, event: { kind: 'result', code } });
+  });
+}
+
+ipcMain.handle('chat:start', (evt, { sessionId }) => ({
+  ok: true,
+  claudeId: chatResumeIds.get(sessionId) || null,
+}));
+
+ipcMain.handle('chat:send', (evt, { sessionId, projectPath, text, images, cli }) => {
+  try {
+    const adapter = chatCli.getAdapter(cli || 'claude');
+    if (!adapter) return { error: `Chat ainda não suportado para "${cli}".` };
+    if (adapter.mode === 'persistent') {
+      const e = ensurePersistentChat(sessionId, projectPath, adapter);
+      e.proc.stdin.write(adapter.buildInput(text, chatResumeIds.get(sessionId) || '', images));
+    } else {
+      if (chatTurnProcs.has(sessionId)) return { error: 'Aguarde o turno atual terminar.' };
+      runChatTurn(sessionId, projectPath, adapter, text);
+    }
+    return { ok: true };
+  } catch (err) {
+    return { error: String((err && err.message) || err) };
+  }
+});
+
+// Encerra o turno atual matando o processo (o resume no próximo send retoma a conversa).
+ipcMain.on('chat:abort', (evt, { sessionId }) => {
+  const p = chatProcs.get(sessionId);
+  if (p && p.alive) killProc(p.proc);
+  const tp = chatTurnProcs.get(sessionId);
+  if (tp) killProc(tp);
+});
+
+ipcMain.handle('chat:close', (evt, { sessionId }) => {
+  const p = chatProcs.get(sessionId);
+  if (p) {
+    try {
+      killProc(p.proc);
+    } catch {}
+    chatProcs.delete(sessionId);
+  }
+  const tp = chatTurnProcs.get(sessionId);
+  if (tp) {
+    try {
+      killProc(tp);
+    } catch {}
+    chatTurnProcs.delete(sessionId);
+  }
+  return { ok: true };
+});
+
 ipcMain.handle('claude:applyTheme', (evt, { theme }) => {
   applyClaudeTheme(theme);
   return { ok: true };
@@ -2334,6 +2494,18 @@ ipcMain.handle('lang:set', (evt, { lang }) => {
   if (lang !== 'pt' && lang !== 'en') return { ok: false };
   const c = loadConfig();
   c.language = lang;
+  saveConfig(c);
+  return { ok: true };
+});
+
+// ---- Modo do painel de chat: 'cli' (terminal Claude Code real, padrão) ou 'chat'
+// (UI assistant-ui, experimental). Global, no config.json. ADITIVO: só decide qual
+// componente o renderer monta no painel esquerdo; o terminal (term:*) não muda em nada.
+const chatModeOf = (v) => (v === 'chat' ? 'chat' : 'cli');
+ipcMain.handle('chatMode:get', () => ({ mode: chatModeOf(loadConfig().chatMode) }));
+ipcMain.handle('chatMode:set', (evt, { mode }) => {
+  const c = loadConfig();
+  c.chatMode = chatModeOf(mode);
   saveConfig(c);
   return { ok: true };
 });

@@ -34,6 +34,7 @@ import ygorPhoto from '@/assets/ygor/ygor-andrade.jpg';
 import { useT, useLang } from '@/lib/i18n';
 import { updateView } from '@/lib/updateView';
 import { useLayout } from '@/lib/layoutContext.jsx';
+import { useChatMode } from '@/lib/chatModeContext.jsx';
 
 // Ícones de marca em SVG inline — o lucide removeu os logos de marca (questão de trademark),
 // então desenhamos aqui. Herdam currentColor e tamanho via className do <span> que os envolve.
@@ -169,6 +170,7 @@ export function SettingsModal({
   const t = useT();
   const { lang, setLang } = useLang();
   const { railSide, claudeSide, setPreset } = useLayout();
+  const { chatMode, setChatMode } = useChatMode();
   const [tab, setTab] = useState(initialTab);
   // Quando reabre apontando pra uma aba específica (ex.: clique na versão do rail).
   useEffect(() => {
@@ -202,6 +204,10 @@ export function SettingsModal({
       return next;
     });
   };
+
+  // Alterna o painel esquerdo entre terminal (cli) e chat assistant-ui (beta). O contexto
+  // (chatModeContext) já grava no config.json via preload e atualiza o App ao vivo.
+  const toggleChatMode = () => setChatMode(chatMode === 'chat' ? 'cli' : 'chat');
 
   // Autosave é só do renderer (o CodeView lê e salva). Guarda em localStorage e avisa
   // o CodeView na hora via evento — assim ligar/desligar vale sem reabrir o editor.
@@ -346,6 +352,29 @@ export function SettingsModal({
                 <span className="font-medium text-foreground">{t('settings.aiNewSessions')}</span>
                 {t('settings.aiIntroPost')}
               </p>
+
+              {/* Modo de chat (beta): terminal cru vs UI assistant-ui. Aditivo — o padrão é o
+                  terminal; ligar só troca o painel esquerdo, o resto do app não muda. */}
+              <div className="mt-5 flex items-start justify-between gap-4 rounded-lg border p-4">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2 text-[13px] font-medium">
+                    Chat em vez do terminal
+                    <span className="rounded bg-secondary px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-primary">
+                      beta
+                    </span>
+                  </div>
+                  <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+                    Mostra um painel de chat em HTML/CSS no lugar do terminal do Claude Code. Ainda
+                    em construção — o terminal continua sendo o modo completo e volta a um clique.
+                  </p>
+                </div>
+                <Switch
+                  checked={chatMode === 'chat'}
+                  onCheckedChange={toggleChatMode}
+                  title={chatMode === 'chat' ? 'Usando chat' : 'Usando terminal'}
+                  className="mt-0.5"
+                />
+              </div>
 
               <div className="mt-5 flex flex-col gap-3">
                 {projects.length === 0 && (

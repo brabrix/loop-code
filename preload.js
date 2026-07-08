@@ -94,6 +94,19 @@ contextBridge.exposeInMainWorld('api', {
   getLang: () => ipcRenderer.invoke('lang:get'),
   setLang: (lang) => ipcRenderer.invoke('lang:set', { lang }),
 
+  // Modo do painel de chat: 'cli' (terminal real, padrão) ou 'chat' (UI assistant-ui)
+  getChatMode: () => ipcRenderer.invoke('chatMode:get'),
+  setChatMode: (mode) => ipcRenderer.invoke('chatMode:set', { mode }),
+
+  // Ponte de chat headless (assistant-ui ↔ `claude -p` stream-json). Os eventos chegam
+  // pelo push 'chat:event' via on(...). Additivo — não substitui o terminal (term:*).
+  chatStart: (sessionId, projectPath, resumeId) =>
+    ipcRenderer.invoke('chat:start', { sessionId, projectPath, resumeId }),
+  chatSend: (sessionId, projectPath, text, cli, images) =>
+    ipcRenderer.invoke('chat:send', { sessionId, projectPath, text, cli, images }),
+  chatAbort: (sessionId) => ipcRenderer.send('chat:abort', { sessionId }),
+  chatClose: (sessionId) => ipcRenderer.invoke('chat:close', { sessionId }),
+
   // Terminal livre (shell comum)
   shellEnsure: (projectPath, cols, rows) =>
     ipcRenderer.invoke('shell:ensure', { projectPath, cols, rows }),
