@@ -395,6 +395,9 @@ function applyViewport(w, vp) {
     w.style.right = 'auto';
     w.style.transform = 'translateX(-50%)';
   }
+  // Modo celular: some com o cursor do sistema no próprio <webview> (o app desenha
+  // a bolinha de "dedo" por cima); nos outros modos volta ao cursor normal.
+  w.style.cursor = vp === 'mobile' ? 'none' : '';
 }
 
 export function PreviewPanel({
@@ -437,6 +440,12 @@ export function PreviewPanel({
   ); // desktop | tablet | mobile
   const viewportRef = useRef(viewport); // leitura síncrona dentro do createTab (deps [])
   viewportRef.current = viewport;
+  // Cursor de "toque" do modo celular: bolinha que segue o mouse + marcadores
+  // efêmeros de tap (ripple), puramente visuais (overlay pointer-events-none).
+  const [taps, setTaps] = useState([]); // { id, x, y } relativos ao container
+  const [touchPos, setTouchPos] = useState(null); // posição do dot de hover
+  const tapId = useRef(0);
+  const tapTimersRef = useRef(new Set()); // setTimeout pendentes — limpos no unmount
   // "Olhando um site": o Ctrl+F só abre a busca aqui (na aba Código, o CodeMirror
   // tem a busca dele). Ref pra ser lido dentro dos listeners registrados uma vez.
   const inWebRef = useRef(false);
@@ -457,6 +466,16 @@ export function PreviewPanel({
   const urlsRef = useRef(new Map()); // path -> url do servidor de preview (marca "tem server no ar")
   const activePathRef = useRef(null);
   const manualStopRef = useRef(new Set()); // paths parados pelo usuário (botão Parar)
+
+  // Limpa os timers de remoção dos taps pendentes ao desmontar (evita setState
+  // depois do unmount).
+  useEffect(() => {
+    const timers = tapTimersRef.current;
+    return () => {
+      for (const id of timers) clearTimeout(id);
+      timers.clear();
+    };
+  }, []);
 
   // --- Helpers do modelo de abas ---
   const getProjTabs = (path) => {
@@ -1713,8 +1732,59 @@ export function PreviewPanel({
               'absolute inset-0',
               !inPreview && 'pointer-events-none',
               inPreview && mode === 'web' && viewport !== 'desktop' && 'bg-muted/40',
+              inPreview && mode === 'web' && viewport === 'mobile' && 'cursor-none',
             )}
+            onMouseMove={
+              inPreview && mode === 'web' && viewport === 'mobile' && !grabbing && !shooting
+                ? (e) => {
+                    const r = containerRef.current.getBoundingClientRect();
+                    setTouchPos({ x: e.clientX - r.left, y: e.clientY - r.top });
+                  }
+                : undefined
+            }
+            onMouseLeave={
+              inPreview && mode === 'web' && viewport === 'mobile' && !grabbing && !shooting
+                ? () => setTouchPos(null)
+                : undefined
+            }
+            onMouseDown={
+              inPreview && mode === 'web' && viewport === 'mobile' && !grabbing && !shooting
+                ? (e) => {
+                    const r = containerRef.current.getBoundingClientRect();
+                    const id = ++tapId.current;
+                    const x = e.clientX - r.left;
+                    const y = e.clientY - r.top;
+                    setTaps((cur) => [...cur, { id, x, y }]);
+                    const timer = setTimeout(() => {
+                      tapTimersRef.current.delete(timer);
+                      setTaps((cur) => cur.filter((tp) => tp.id !== id));
+                    }, 500);
+                    tapTimersRef.current.add(timer);
+                  }
+                : undefined
+            }
           />
+          {/* Cursor de "toque" do modo celular: bolinha translúcida que segue o mouse +
+              ripple no clique, simulando um dedo (estilo indicador de tap do iPhone).
+              pointer-events-none: é só camada visual do app, o clique real passa direto
+              pro <webview> por baixo. */}
+          {inPreview && mode === 'web' && viewport === 'mobile' && (
+            <div className="pointer-events-none absolute inset-0 z-20">
+              {touchPos && (
+                <span
+                  className="absolute -ml-3 -mt-3 size-6 rounded-full border-2 border-primary/70 bg-primary/20"
+                  style={{ left: touchPos.x, top: touchPos.y }}
+                />
+              )}
+              {taps.map((tp) => (
+                <span
+                  key={tp.id}
+                  className="absolute -ml-5 -mt-5 size-10 animate-ping rounded-full bg-primary/30"
+                  style={{ left: tp.x, top: tp.y }}
+                />
+              ))}
+            </div>
+          )}
           {/* Borda discreta: foco está dentro do preview → Ctrl +/- zooma o site, não o app. */}
           {inPreview && mode === 'web' && webFocused && (
             <div className="pointer-events-none absolute inset-0 z-10 ring-2 ring-inset ring-primary/40" />
