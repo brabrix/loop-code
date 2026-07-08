@@ -75,6 +75,7 @@ import { useT } from '@/lib/i18n';
 import { isHtml } from '@/lib/htmlPreview';
 import { toast } from '@/lib/toast';
 import { MOVE_MIME } from '@/lib/dragPaths.js';
+import { normalizeRect, rectsIntersect } from '@/lib/marquee.js';
 
 // Preview de markdown renderizado (react-markdown + GFM + highlight), sob demanda.
 const Markdown = lazy(() => import('./Markdown.jsx'));
@@ -372,6 +373,12 @@ export function CodeView({ active, openRequest, visible = true }) {
   const anchorRef = useRef(null);
   anchorRef.current = anchorPath;
 
+  // Seleção por arrastar (marquee) em área vazia da árvore: retângulo em coords de
+  // viewport enquanto arrasta; null quando não está arrastando. marqueeStart guarda o
+  // ponto inicial só em ref (não precisa re-render até passar do threshold).
+  const [marquee, setMarquee] = useState(null); // { x0, y0, x1, y1 }
+  const marqueeStart = useRef(null);
+
   // Calcula a faixa de itens visíveis entre dois paths, na ordem em que aparecem na
   // árvore (lê o DOM, então respeita pastas abertas/fechadas — só conta o que está visível).
   const computeRange = (anchor, target) => {
@@ -429,6 +436,52 @@ export function CodeView({ active, openRequest, visible = true }) {
     }
     setSelected({ path: item.path, name: item.name, isDir: item.isDir });
   };
+
+  // Início do marquee: só em área vazia (fora de qualquer [data-tree-row], pra não
+  // roubar o dragstart nativo do DnD de mover) e só com o botão esquerdo. O gesto só
+  // vira seleção de fato depois que onMouseMoveWindow passar do threshold de 4px.
+  const onTreeMouseDown = (e) => {
+    if (query.trim()) return; // no modo busca a árvore vira lista de resultados, sem marquee
+    if (e.button !== 0) return;
+    if (e.target.closest('[data-tree-row]')) return;
+    marqueeStart.current = { x: e.clientX, y: e.clientY };
+  };
+
+  // Listeners em window (não no container) porque o mouse pode sair da área visível
+  // da árvore durante o arraste; só fazem algo enquanto marqueeStart.current existir.
+  // Lê o DOM ao vivo (como computeRange) em vez de depender de estado React da lista.
+  useEffect(() => {
+    const onMove = (e) => {
+      const start = marqueeStart.current;
+      if (!start) return;
+      if (Math.abs(e.clientX - start.x) < 4 && Math.abs(e.clientY - start.y) < 4) return;
+      const rect = normalizeRect(start.x, start.y, e.clientX, e.clientY);
+      setMarquee({ x0: start.x, y0: start.y, x1: e.clientX, y1: e.clientY });
+      const next = new Map();
+      document.querySelectorAll('[data-tree-row]').forEach((el) => {
+        const b = el.getBoundingClientRect();
+        if (rectsIntersect(rect, { left: b.left, top: b.top, right: b.right, bottom: b.bottom })) {
+          next.set(el.dataset.path, {
+            path: el.dataset.path,
+            name: el.dataset.name,
+            isDir: el.dataset.dir === '1',
+          });
+        }
+      });
+      setSelItems(next);
+    };
+    const onUp = () => {
+      marqueeStart.current = null;
+      setMarquee(null);
+    };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+    return () => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    };
+  }, []);
+
   const [refresh, setRefresh] = useState(0);
   const bump = () => setRefresh((n) => n + 1);
   // Observa o projeto ativo no disco: quando algo muda lá fora (ex.: o Claude cria
@@ -978,6 +1031,7 @@ export function CodeView({ active, openRequest, visible = true }) {
             )}
             <div
               className="min-h-0 flex-1 overflow-auto py-1.5"
+              onMouseDown={onTreeMouseDown}
               onContextMenu={(e) => {
                 // Clique direito na área em branco: menu da raiz do projeto (só Colar).
                 openMenu(e, { path: active.path, name: active.name, isDir: true, root: true });
@@ -1057,6 +1111,21 @@ export function CodeView({ active, openRequest, visible = true }) {
                 </FileTreeCtx.Provider>
               )}
             </div>
+            {marquee &&
+              (() => {
+                const r = normalizeRect(marquee.x0, marquee.y0, marquee.x1, marquee.y1);
+                return (
+                  <div
+                    className="pointer-events-none fixed z-50 border border-primary bg-primary/10"
+                    style={{
+                      left: r.left,
+                      top: r.top,
+                      width: r.right - r.left,
+                      height: r.bottom - r.top,
+                    }}
+                  />
+                );
+              })()}
           </>
         ) : (
           <div className="px-3 py-1.5 text-sm text-muted-foreground">{t('tree.empty')}</div>
