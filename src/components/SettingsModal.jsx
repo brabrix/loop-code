@@ -22,6 +22,9 @@ import {
   HardDrive,
   RefreshCw,
   WrapText,
+  Search,
+  ArrowDownAZ,
+  ArrowUpAZ,
 } from 'lucide-react';
 import { useTheme } from '@/lib/theme.jsx';
 import { Input } from './ui/input.jsx';
@@ -30,6 +33,7 @@ import { Button } from './ui/button.jsx';
 import { useDependencyStatus, DependencyCards } from './SetupScreen.jsx';
 import { cn } from '@/lib/utils';
 import { AI_OPTIONS, CliBadge } from '@/lib/aiOptions.jsx';
+import { filterAndSortProjects } from '@/lib/projectFilter.js';
 import ygorPhoto from '@/assets/ygor/ygor-andrade.jpg';
 import { useT, useLang } from '@/lib/i18n';
 import { updateView } from '@/lib/updateView';
@@ -178,6 +182,8 @@ export function SettingsModal({
   }, [open, initialTab]);
   const [projects, setProjects] = useState([]);
   const [sel, setSel] = useState({}); // path -> { ais, custom }
+  const [aiQuery, setAiQuery] = useState(''); // filtro de busca da lista "IA por projeto"
+  const [aiSort, setAiSort] = useState('default'); // 'default' | 'asc' | 'desc'
   const [zoom, setZoom] = useState(1); // fator de zoom da janela (1 = 100%)
   const [notify, setNotify] = useState(true); // notificar quando o Claude termina
   const [autoSave, setAutoSave] = useState(false); // salvar arquivos do editor automaticamente
@@ -282,6 +288,10 @@ export function SettingsModal({
     });
   };
 
+  // Lista visível da aba "IA por projeto": filtro por busca + ordenação por nome (pura, testada
+  // em src/lib/projectFilter.js). 'default' preserva a ordem que veio do Rail.
+  const visibleProjects = filterAndSortProjects(projects, { query: aiQuery, sort: aiSort });
+
   return (
     <div className="fixed inset-0 z-50 flex bg-background">
       {/* Navegação lateral */}
@@ -382,15 +392,56 @@ export function SettingsModal({
                     {t('settings.aiEmpty')}
                   </div>
                 )}
-                {projects.map((p) => {
+                {projects.length > 1 && (
+                  <div className="flex items-center gap-2">
+                    <div className="relative flex-1">
+                      <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+                      <input
+                        value={aiQuery}
+                        onChange={(e) => setAiQuery(e.target.value)}
+                        placeholder={t('settings.aiSearchPlaceholder')}
+                        className="w-full rounded-md border bg-background py-1.5 pl-8 pr-2 text-sm outline-none focus:ring-1 focus:ring-primary"
+                      />
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setAiSort((s) => (s === 'asc' ? 'desc' : s === 'desc' ? 'default' : 'asc'))
+                      }
+                      title={t(
+                        aiSort === 'asc'
+                          ? 'settings.aiSortAsc'
+                          : aiSort === 'desc'
+                            ? 'settings.aiSortDesc'
+                            : 'settings.aiSortDefault',
+                      )}
+                      className={cn(
+                        'grid size-8 shrink-0 place-items-center rounded-md border transition-colors hover:bg-muted',
+                        aiSort !== 'default' && 'border-primary text-primary',
+                      )}
+                    >
+                      {aiSort === 'desc' ? (
+                        <ArrowUpAZ className="size-4" />
+                      ) : (
+                        <ArrowDownAZ className="size-4" />
+                      )}
+                    </button>
+                  </div>
+                )}
+                {visibleProjects.length === 0 && projects.length > 0 && (
+                  <div className="rounded-lg border border-dashed p-8 text-center text-sm text-muted-foreground">
+                    {t('settings.aiNoResults')}
+                  </div>
+                )}
+                {visibleProjects.map((p) => {
                   const cur = sel[p.path] || { ais: ['claude'], custom: '' };
                   return (
                     <div key={p.path} className="rounded-lg border p-3">
                       <div className="mb-2.5 flex items-center gap-2">
                         {p.icon ? (
-                          <img src={p.icon} alt="" className="size-5 rounded-sm object-contain" />
+                          <img src={p.icon} alt="" className="size-8 rounded-md object-contain" />
                         ) : (
-                          <span className="grid size-5 place-items-center rounded-sm bg-muted text-[11px] font-semibold uppercase">
+                          <span className="grid size-8 place-items-center rounded-md bg-muted text-sm font-semibold uppercase">
                             {p.name?.[0] || '?'}
                           </span>
                         )}
