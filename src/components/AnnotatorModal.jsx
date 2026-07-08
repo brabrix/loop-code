@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Pencil, ArrowUpRight, Square, Type, Undo2, Copy, X } from 'lucide-react';
 import * as fabric from 'fabric';
 import { cn } from '@/lib/utils';
@@ -50,6 +51,23 @@ export default function AnnotatorModal({ dataURL, onCopy, onClose }) {
       canvas.freeDrawingBrush = new fabric.PencilBrush(canvas);
       canvas.freeDrawingBrush.color = colorRef.current;
       canvas.freeDrawingBrush.width = STROKE_W;
+
+      // Fit-to-viewport: mostra a captura INTEIRA (Bug "printa um pedaço"). O espaço de
+      // coordenadas do Fabric segue no tamanho NATURAL da imagem (backstore full-res →
+      // toDataURL exporta em resolução cheia); só o tamanho EXIBIDO encolhe via CSS
+      // (setDimensions cssOnly). getScenePoint compensa a escala CSS pelo
+      // getBoundingClientRect, então caneta/retângulo/seta/texto continuam caindo sob o
+      // cursor mesmo com a imagem reduzida.
+      const maxW = Math.min(img.width, Math.round(window.innerWidth * 0.88));
+      const maxH = Math.min(img.height, Math.round(window.innerHeight * 0.72));
+      const fit = Math.min(maxW / img.width, maxH / img.height, 1);
+      if (fit < 1) {
+        canvas.setDimensions(
+          { width: Math.round(img.width * fit), height: Math.round(img.height * fit) },
+          { cssOnly: true },
+        );
+      }
+
       canvas.renderAll();
       fabricRef.current = canvas;
 
@@ -233,7 +251,12 @@ export default function AnnotatorModal({ dataURL, onCopy, onClose }) {
     return () => window.removeEventListener('keydown', onKey, true);
   }, [onClose]);
 
-  return (
+  // Portal pro <body>: o modal é `fixed inset-0`, mas fica renderizado FUNDO dentro do
+  // painel de preview (ancestrais com transform/isolation confinariam o `fixed` e o
+  // backdrop não cobriria a janela toda). No body ele cobre a viewport de verdade e os
+  // cliques param nele — nada vaza pro conteúdo atrás. (O PreviewPanel ainda esconde o
+  // <webview> nativo enquanto o modal está aberto, senão ele compõe por cima do DOM.)
+  return createPortal(
     <div
       className="fixed inset-0 z-[200] grid place-items-center bg-background/80 p-4 backdrop-blur-sm"
       onMouseDown={(e) => {
@@ -241,8 +264,13 @@ export default function AnnotatorModal({ dataURL, onCopy, onClose }) {
       }}
     >
       <div className="flex max-h-[92vh] max-w-[92vw] flex-col overflow-hidden rounded-lg border bg-card shadow-xl">
-        {/* Toolbar */}
-        <div className="flex flex-wrap items-center gap-2 border-b p-2">
+        {/* Palco (em cima) */}
+        <div className="overflow-auto bg-muted/30 p-3">
+          <canvas ref={canvasElRef} className="block" />
+        </div>
+
+        {/* Toolbar (embaixo) */}
+        <div className="flex flex-wrap items-center gap-2 border-t p-2">
           {TOOLS.map(({ key, Icon, labelKey }) => (
             <button
               key={key}
@@ -309,12 +337,8 @@ export default function AnnotatorModal({ dataURL, onCopy, onClose }) {
             </button>
           </div>
         </div>
-
-        {/* Palco */}
-        <div className="overflow-auto bg-muted/30 p-3">
-          <canvas ref={canvasElRef} className="block" />
-        </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

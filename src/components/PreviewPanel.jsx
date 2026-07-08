@@ -614,7 +614,7 @@ export function PreviewPanel({
         // Modo celular: a navegação/reload apaga o DOM injetado, então re-injeta o
         // cursor de "toque" (bolinha + ripple) a cada dom-ready enquanto estiver no
         // celular. Fora do celular, não faz nada.
-        if (viewportRef.current === 'mobile') {
+        if (viewportRef.current !== 'desktop') {
           try {
             w.executeJavaScript(TOUCH_INJECT);
           } catch {}
@@ -852,6 +852,20 @@ export function PreviewPanel({
     },
     [active, t],
   );
+
+  // Enquanto o anotador está aberto, esconde a camada dos <webview>: o webview nativo do
+  // Electron compõe ACIMA do DOM normal onde se sobrepõem, então mesmo o modal cobrindo
+  // tudo seria pintado por baixo dele e o webview comeria os cliques (o mesmo motivo do
+  // "grab" injetar na página em vez de sobrepor). O modal mostra a captura estática, então
+  // ocultar o webview vivo é imperceptível. `visibility:hidden` mantém o layout/PTY.
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    el.style.visibility = shot ? 'hidden' : '';
+    return () => {
+      if (el) el.style.visibility = '';
+    };
+  }, [shot]);
 
   // Menu da câmera: "Selecionar área" entra no modo recorte; "Tela toda" captura na hora.
   // Qualquer um desliga o seletor de elemento (um modo por vez).
@@ -1165,12 +1179,13 @@ export function PreviewPanel({
   }, [view, mode, active, tabBar.activeId]);
 
   // Troca o modo de visualização (desktop/tablet/celular): re-aplica em todos os
-  // webviews (os escondidos não atrapalham) e guarda a preferência. No celular,
-  // injeta o cursor de "toque" na página (bolinha + ripple, mecânica do seletor de
-  // elementos); ao sair do celular, roda o CLEANUP (idempotente, sem vazar).
+  // webviews (os escondidos não atrapalham) e guarda a preferência. Nos modos
+  // TOUCH (celular e tablet — os dois são telas de toque), injeta o cursor de
+  // "toque" na página (bolinha + ripple, mecânica do seletor de elementos); no
+  // desktop roda o CLEANUP (idempotente, sem vazar).
   useEffect(() => {
     localStorage.setItem('previewViewport', viewport);
-    const script = viewport === 'mobile' ? TOUCH_INJECT : TOUCH_CLEANUP;
+    const script = viewport !== 'desktop' ? TOUCH_INJECT : TOUCH_CLEANUP;
     for (const w of allWebviews()) {
       applyViewport(w, viewport);
       try {
