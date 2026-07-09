@@ -170,6 +170,7 @@
     "newFolder": "Nova pasta",
     "paste": "Colar",
     "reveal": "Abrir no Explorador",
+    "revealInTree": "Localizar na árvore",
     "cut": "Cortar",
     "copy": "Copiar",
     "copyPath": "Copiar caminho",
@@ -340,6 +341,9 @@
     "back": "Voltar",
     "forward": "Avançar",
     "reload": "Recarregar página",
+    "reload_hard": "Recarregar ignorando cache (hard reload)",
+    "capture_failed": "Não consegui capturar o preview",
+    "copy_image_failed": "Não consegui copiar a imagem",
     "url_placeholder": "Preview",
     "open_browser": "Abrir no navegador padrão",
     "find_placeholder": "Buscar na página",
@@ -383,6 +387,16 @@
     "claude_prompt_6": "3. Garanta que ele escuta em http://localhost numa porta acessivel.",
     "claude_prompt_7": "",
     "claude_prompt_8": "Me diga o que estava faltando e corrija."
+  },
+  "annotator": {
+    "pen": "Caneta",
+    "rect": "Retângulo",
+    "arrow": "Seta",
+    "text": "Texto",
+    "undo": "Desfazer",
+    "cancel": "Cancelar",
+    "copy": "Copiar",
+    "textPlaceholder": "Texto"
   },
   "mcp": {
     "panel": {
@@ -558,11 +572,17 @@
     "tabDeps": "Dependências",
     "tabLanguage": "Idioma",
     "tabAbout": "Sobre & créditos",
+    "tabWhatsNew": "Novidades",
     "close": "Fechar (Esc)",
     "aiIntroPre": "Escolha qual CLI de IA cada projeto usa. Vale para as ",
     "aiNewSessions": "novas sessões",
     "aiIntroPost": " abertas naquele projeto.",
     "aiEmpty": "Nenhum projeto ainda. Adicione um projeto na barra lateral.",
+    "aiSearchPlaceholder": "Buscar projeto…",
+    "aiSortDefault": "Ordem padrão",
+    "aiSortAsc": "Nome (A→Z)",
+    "aiSortDesc": "Nome (Z→A)",
+    "aiNoResults": "Nenhum projeto encontrado para a busca.",
     "aiCustomPlaceholder": "comando do CLI (ex.: meu-cli --flag)",
     "aiClaudeDesc": "Sua assinatura Claude (não a API).",
     "aiCodexDesc": "ChatGPT/OpenAI no terminal · npm i -g @openai/codex.",
@@ -620,7 +640,10 @@
     "layoutPresetRL": "Rail à direita, Claude à esquerda",
     "layoutPresetRR": "Rail e Claude à direita",
     "aboutVersionLabel": "Versão instalada",
-    "checkUpdates": "Verificar atualizações"
+    "checkUpdates": "Verificar atualizações",
+    "contributeTitle": "Deseja subir alguma correção?",
+    "contributeBody": "O Carcará Code é open source. Se você corrigiu um bug ou melhorou algo, abra um Pull Request no GitHub — sua contribuição é bem-vinda.",
+    "contributeButton": "Contribuir no GitHub"
   },
   "aiPicker": {
     "title": "Escolha a IA desta aba",

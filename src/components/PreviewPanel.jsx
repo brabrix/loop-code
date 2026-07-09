@@ -41,8 +41,10 @@ import { cn } from '@/lib/utils';
 import { ErrorBoundary } from './ErrorBoundary.jsx';
 import { FindBar } from './FindBar.jsx';
 import { INJECT, CLEANUP, GRAB_SENTINEL, GRAB_CANCEL } from '@/lib/grabScript';
+import { INJECT as TOUCH_INJECT, CLEANUP as TOUCH_CLEANUP } from '@/lib/touchCursorScript';
 import { rectFromDrag } from '@/lib/screenshot';
 import { useT } from '@/lib/i18n';
+import { toast } from '@/lib/toast';
 
 // Faz os botões laterais do mouse (voltar/avançar) funcionarem dentro do preview.
 // O Electron não identifica esses botões no input-event do main (button=undefined),
@@ -75,6 +77,8 @@ const CheckpointsPanel = lazy(() =>
   import('./CheckpointsPanel.jsx').then((m) => ({ default: m.CheckpointsPanel })),
 );
 const TodosPanel = lazy(() => import('./TodosPanel.jsx').then((m) => ({ default: m.TodosPanel })));
+// Anotador do print (Fabric.js): code-split — só carrega quando há uma captura pra marcar.
+const AnnotatorModal = lazy(() => import('./AnnotatorModal.jsx'));
 
 // Fallback enquanto o chunk do painel carrega (costuma ser instantâneo no disco).
 function PanelFallback() {
@@ -173,7 +177,11 @@ function tabLabel(tab, fallback) {
 // Uma "aba" no estilo VS Code / Claude Code: encostada na vizinha, com uma listrinha
 // da cor da brasa em cima da ATIVA e o fundo dela igual ao do conteúdo (pra "saltar").
 // Clique = ativa; botão do meio ou ✕ = fecha.
-function TabChip({ label, active, onSelect, onClose, closeTitle }) {
+function TabChip({ label, favicon, active, onSelect, onClose, closeTitle }) {
+  // Favicon da página na aba; cai no globo se não houver ou se a imagem quebrar.
+  const [favBroken, setFavBroken] = useState(false);
+  useEffect(() => setFavBroken(false), [favicon]);
+  const showFav = favicon && !favBroken;
   return (
     <div
       onClick={onSelect}
@@ -193,7 +201,16 @@ function TabChip({ label, active, onSelect, onClose, closeTitle }) {
     >
       {/* Listrinha em cima = qual aba está selecionada (só na ativa). */}
       {active && <span className="absolute inset-x-0 top-0 h-0.5 bg-primary" />}
-      <Globe className={cn('size-3.5 shrink-0', active ? 'text-primary' : 'opacity-50')} />
+      {showFav ? (
+        <img
+          src={favicon}
+          alt=""
+          className="size-3.5 shrink-0 rounded-[2px] object-contain"
+          onError={() => setFavBroken(true)}
+        />
+      ) : (
+        <Globe className={cn('size-3.5 shrink-0', active ? 'text-primary' : 'opacity-50')} />
+      )}
       <span className={cn('min-w-0 flex-1 truncate', active && 'font-medium')}>{label}</span>
       <button
         type="button"
@@ -311,8 +328,14 @@ function ShotPicker({ onArea, onFull, active, disabled }) {
     return () => window.removeEventListener('mousedown', onDown);
   }, [open]);
   const OPTS = [
-    { key: 'area', label: t('preview.shot_area'), Icon: Crop, run: onArea },
-    { key: 'full', label: t('preview.shot_full'), Icon: Monitor, run: onFull },
+    { key: 'area', label: t('preview.shot_area'), Icon: Crop, run: onArea, keys: ['Ctrl', 'P'] },
+    {
+      key: 'full',
+      label: t('preview.shot_full'),
+      Icon: Monitor,
+      run: onFull,
+      keys: ['Ctrl', 'Shift', 'P'],
+    },
   ];
   return (
     <div ref={ref} className="relative">
@@ -327,7 +350,7 @@ function ShotPicker({ onArea, onFull, active, disabled }) {
         <Camera />
       </ToolButton>
       {open && (
-        <div className="absolute right-0 top-9 z-50 min-w-[170px] overflow-hidden rounded-md border bg-popover py-1 shadow-md">
+        <div className="absolute right-0 top-9 z-50 min-w-[220px] overflow-hidden rounded-md border bg-popover py-1 shadow-md">
           {OPTS.map((o) => (
             <button
               key={o.key}
@@ -339,7 +362,17 @@ function ShotPicker({ onArea, onFull, active, disabled }) {
               className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[13px] hover:bg-muted [&_svg]:size-4"
             >
               <o.Icon />
-              {o.label}
+              <span>{o.label}</span>
+              <span className="ml-auto flex items-center gap-0.5 text-muted-foreground">
+                {o.keys.map((k) => (
+                  <kbd
+                    key={k}
+                    className="rounded border bg-muted px-1 font-mono text-[10px] leading-normal"
+                  >
+                    {k}
+                  </kbd>
+                ))}
+              </span>
             </button>
           ))}
         </div>
@@ -411,12 +444,16 @@ export function PreviewPanel({
   const [findOpen, setFindOpen] = useState(false); // barra "buscar na página" (Ctrl+F)
   const [findNonce, setFindNonce] = useState(0); // bump a cada Ctrl+F: re-foca o input da busca
   const [shooting, setShooting] = useState(false); // modo "print do preview" ativo
-  const [shot, setShot] = useState(false); // toast "Print copiado!"
+  const [shot, setShot] = useState(null); // dataURL da captura crua → abre o anotador
+  const shotRef = useRef(shot); // leitura síncrona dentro do listener de F5/hard-reload (deps [])
+  shotRef.current = shot;
+  const [shotDone, setShotDone] = useState(false); // toast "Print copiado!"
   const [shotRect, setShotRect] = useState(null); // rubber-band do arraste (coords do overlay), null quando não arrastando
   const shootStartRef = useRef(null); // { cx, cy } início do arraste (coords de tela)
   const overlayRef = useRef(null); // camada do print (pra medir e desenhar o retângulo)
   const [canBack, setCanBack] = useState(false); // navegação do preview (voltar/avançar)
   const [canFwd, setCanFwd] = useState(false);
+  const [ctrlHeld, setCtrlHeld] = useState(false); // Ctrl/Cmd pressionado: feedback laranja no botão de recarregar (hard reload)
   const [webFocused, setWebFocused] = useState(false); // foco está DENTRO do webview do projeto ativo
   const [viewport, setViewport] = useState(
     () => localStorage.getItem('previewViewport') || 'desktop',
@@ -473,7 +510,13 @@ export function PreviewPanel({
     }
     setTabBar({
       activeId: p.activeId,
-      tabs: p.tabs.map((t) => ({ id: t.id, url: t.url, src: t.src, title: t.title })),
+      tabs: p.tabs.map((t) => ({
+        id: t.id,
+        url: t.url,
+        src: t.src,
+        title: t.title,
+        favicon: t.favicon,
+      })),
     });
   }, []);
   const devtoolsHostRef = useRef(null); // div que segura o webview do DevTools
@@ -514,6 +557,7 @@ export function PreviewPanel({
         src: url || '',
         url: url || '',
         title: '',
+        favicon: '',
         canBack: false,
         canFwd: false,
       };
@@ -538,6 +582,7 @@ export function PreviewPanel({
       w.addEventListener('did-navigate', (e) => {
         if (e.url) {
           tab.url = e.url;
+          tab.favicon = ''; // nova página: zera o favicon até o page-favicon-updated chegar
           if (isActiveTab()) setUrl(e.url);
           if (isActiveProject()) refreshTabBar();
         }
@@ -553,6 +598,10 @@ export function PreviewPanel({
       });
       w.addEventListener('page-title-updated', (e) => {
         tab.title = e.title || '';
+        if (isActiveProject()) refreshTabBar();
+      });
+      w.addEventListener('page-favicon-updated', (e) => {
+        tab.favicon = (e.favicons && e.favicons[0]) || '';
         if (isActiveProject()) refreshTabBar();
       });
       w.addEventListener('did-fail-load', (e) => {
@@ -578,6 +627,14 @@ export function PreviewPanel({
         try {
           w.executeJavaScript(NAV_INJECT);
         } catch {}
+        // Modo celular: a navegação/reload apaga o DOM injetado, então re-injeta o
+        // cursor de "toque" (bolinha + ripple) a cada dom-ready enquanto estiver no
+        // celular. Fora do celular, não faz nada.
+        if (viewportRef.current !== 'desktop') {
+          try {
+            w.executeJavaScript(TOUCH_INJECT);
+          } catch {}
+        }
       });
       // Ponte do "selecionar elemento": o script injetado emite o pacote via console.
       w.addEventListener('console-message', (e) => {
@@ -794,7 +851,8 @@ export function PreviewPanel({
   // O overlay (camada do app) captura o gesto de recorte; a captura em si roda no main
   // via webContents.capturePage e cai no clipboard.
 
-  // Captura o webview ativo (rect = null → tela toda) e mostra o toast no sucesso.
+  // Captura o webview ativo (rect = null → tela toda) SEM copiar: abre o anotador com a
+  // imagem crua. Copiar (com ou sem marcações) acontece no modal.
   const doCapture = useCallback(
     async (rect) => {
       const w = active && activeWebviewOf(active.path);
@@ -804,14 +862,26 @@ export function PreviewPanel({
         id = w.getWebContentsId();
       } catch {}
       if (id == null) return;
-      const res = await window.api.capturePreview(id, rect);
-      if (res && res.ok) {
-        setShot(true);
-        setTimeout(() => setShot(false), 2200);
-      }
+      const res = await window.api.capturePreview(id, rect, { toClipboard: false });
+      if (res && res.dataURL) setShot(res.dataURL);
+      else toast.error(t('preview.capture_failed'));
     },
-    [active],
+    [active, t],
   );
+
+  // Enquanto o anotador está aberto, esconde a camada dos <webview>: o webview nativo do
+  // Electron compõe ACIMA do DOM normal onde se sobrepõem, então mesmo o modal cobrindo
+  // tudo seria pintado por baixo dele e o webview comeria os cliques (o mesmo motivo do
+  // "grab" injetar na página em vez de sobrepor). O modal mostra a captura estática, então
+  // ocultar o webview vivo é imperceptível. `visibility:hidden` mantém o layout/PTY.
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    el.style.visibility = shot ? 'hidden' : '';
+    return () => {
+      if (el) el.style.visibility = '';
+    };
+  }, [shot]);
 
   // Menu da câmera: "Selecionar área" entra no modo recorte; "Tela toda" captura na hora.
   // Qualquer um desliga o seletor de elemento (um modo por vez).
@@ -826,6 +896,38 @@ export function PreviewPanel({
     setShooting(false);
     doCapture(null);
   }, [active, stopGrab, doCapture]);
+
+  // Atalhos de print (mesmo esquema do Ctrl+F): Ctrl/Cmd+P = "Selecionar área" (recorte);
+  // Ctrl/Cmd+Shift+P = "Tela toda" (abre o anotador na hora). Só valem olhando um site.
+  // Caminho 1 — foco na app (fora do webview): pega o atalho no window; preventDefault
+  // barra o "imprimir" do navegador.
+  useEffect(() => {
+    const onKey = (e) => {
+      if (!(e.ctrlKey || e.metaKey) || e.altKey) return;
+      if (e.key.toLowerCase() !== 'p') return;
+      if (!inWebRef.current) return;
+      e.preventDefault();
+      if (e.shiftKey) captureFull();
+      else startCrop();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [startCrop, captureFull]);
+
+  // Caminho 2 — foco DENTRO do webview: o main intercepta o Ctrl+P (senão o site abriria o
+  // próprio diálogo de impressão) e manda 'preview:screenshot' com o id do webContents.
+  useEffect(() => {
+    return window.api.on('preview:screenshot', ({ id, full }) => {
+      const w = activePathRef.current && activeWebviewOf(activePathRef.current);
+      let cid = null;
+      try {
+        cid = w && w.getWebContentsId();
+      } catch {}
+      if (cid == null || id !== cid) return;
+      if (full) captureFull();
+      else startCrop();
+    });
+  }, [startCrop, captureFull]);
 
   // Borda externa laranja no webview enquanto o modo print (recorte) está ativo, pra
   // sinalizar "vou tirar foto" (não é a borda interna do foco; é a borda do elemento).
@@ -1125,10 +1227,19 @@ export function PreviewPanel({
   }, [view, mode, active, tabBar.activeId]);
 
   // Troca o modo de visualização (desktop/tablet/celular): re-aplica em todos os
-  // webviews (os escondidos não atrapalham) e guarda a preferência.
+  // webviews (os escondidos não atrapalham) e guarda a preferência. Nos modos
+  // TOUCH (celular e tablet — os dois são telas de toque), injeta o cursor de
+  // "toque" na página (bolinha + ripple, mecânica do seletor de elementos); no
+  // desktop roda o CLEANUP (idempotente, sem vazar).
   useEffect(() => {
     localStorage.setItem('previewViewport', viewport);
-    for (const w of allWebviews()) applyViewport(w, viewport);
+    const script = viewport !== 'desktop' ? TOUCH_INJECT : TOUCH_CLEANUP;
+    for (const w of allWebviews()) {
+      applyViewport(w, viewport);
+      try {
+        w.executeJavaScript(script);
+      } catch {}
+    }
   }, [viewport]);
 
   const pollingRef = useRef(new Set()); // paths com um waitAndShow em curso (evita loops duplicados)
@@ -1339,13 +1450,64 @@ export function PreviewPanel({
     });
   }, [createTab, refreshTabBar]);
 
-  const reload = () => {
+  // Recarregar normal; com Ctrl/Cmd (atalho ou clique) vira hard reload, ignorando cache.
+  const reload = (e) => {
     if (active) {
       try {
-        activeWebviewOf(active.path)?.reload();
+        const wv = activeWebviewOf(active.path);
+        const hard = e && (e.ctrlKey || e.metaKey);
+        if (hard) wv?.reloadIgnoringCache();
+        else wv?.reload();
       } catch {}
     }
   };
+  // Atalhos de hard reload (Ctrl+F5 / Ctrl+Shift+R / Cmd+Shift+R), só valem "olhando um
+  // site" (mesmo gate do Ctrl+F acima). Lê tudo por ref pra não precisar de deps e não
+  // correr risco de webview/path desatualizados. F5 puro continua sendo reload normal.
+  useEffect(() => {
+    const onKey = (e) => {
+      if (!inWebRef.current) return;
+      if (shotRef.current) return; // anotador aberto por cima: não recarrega o webview escondido
+      const key = e.key;
+      const hard =
+        (e.ctrlKey && key === 'F5') ||
+        ((e.ctrlKey || e.metaKey) && e.shiftKey && (key === 'R' || key === 'r'));
+      const w = activePathRef.current && activeWebviewOf(activePathRef.current);
+      if (hard) {
+        e.preventDefault();
+        try {
+          w?.reloadIgnoringCache();
+        } catch {}
+      } else if (key === 'F5' && !e.ctrlKey) {
+        e.preventDefault();
+        try {
+          w?.reload();
+        } catch {}
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+  // Feedback visual: segurar Ctrl/Cmd deixa a setinha de recarregar laranja (hard reload
+  // à mão). blur limpa o estado pra não travar "preso" laranja se a pessoa alt-tabar
+  // segurando a tecla.
+  useEffect(() => {
+    const onDown = (e) => {
+      if (e.key === 'Control' || e.key === 'Meta') setCtrlHeld(true);
+    };
+    const onUp = (e) => {
+      if (e.key === 'Control' || e.key === 'Meta') setCtrlHeld(false);
+    };
+    const onBlur = () => setCtrlHeld(false);
+    window.addEventListener('keydown', onDown);
+    window.addEventListener('keyup', onUp);
+    window.addEventListener('blur', onBlur);
+    return () => {
+      window.removeEventListener('keydown', onDown);
+      window.removeEventListener('keyup', onUp);
+      window.removeEventListener('blur', onBlur);
+    };
+  }, []);
   // Abre o preview atual no navegador padrão do sistema. Sem lock-in: se a pessoa
   // preferir o navegador dela (DevTools próprio, extensões, etc.), é só um clique.
   const openInBrowser = () => {
@@ -1526,8 +1688,11 @@ export function PreviewPanel({
                   type="button"
                   onClick={reload}
                   disabled={mode !== 'web'}
-                  title={t('preview.reload')}
-                  className="absolute left-1 top-1/2 grid h-6 w-6 -translate-y-1/2 place-items-center rounded text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-40 [&_svg]:size-[14px]"
+                  title={ctrlHeld ? t('preview.reload_hard') : t('preview.reload')}
+                  className={cn(
+                    'absolute left-1 top-1/2 grid h-6 w-6 -translate-y-1/2 place-items-center rounded transition-colors hover:bg-muted disabled:pointer-events-none disabled:opacity-40 [&_svg]:size-[14px]',
+                    ctrlHeld ? 'text-primary' : 'text-muted-foreground hover:text-foreground',
+                  )}
                 >
                   <RotateCWIcon />
                 </button>
@@ -1605,6 +1770,7 @@ export function PreviewPanel({
               <TabChip
                 key={tab.id}
                 label={tabLabel(tab, t('preview.tab_untitled'))}
+                favicon={tab.favicon}
                 active={tab.id === tabBar.activeId}
                 onSelect={() => selectTab(tab.id)}
                 onClose={() => closeTab(tab.id)}
@@ -1680,19 +1846,37 @@ export function PreviewPanel({
               )}
             </div>
           )}
-          {inPreview && (shooting || shot) && (
+          {inPreview && (shooting || shotDone) && (
             <div className="pointer-events-none absolute inset-x-0 top-3 z-40 flex justify-center">
               <div
                 className={cn(
                   'rounded-full border px-3 py-1.5 text-xs font-medium shadow-md',
-                  shot
+                  shotDone
                     ? 'border-primary/40 bg-primary text-primary-foreground'
                     : 'bg-popover text-popover-foreground',
                 )}
               >
-                {shot ? t('preview.shot_done') : t('preview.shot_active')}
+                {shotDone ? t('preview.shot_done') : t('preview.shot_active')}
               </div>
             </div>
+          )}
+          {shot && (
+            <Suspense fallback={null}>
+              <AnnotatorModal
+                dataURL={shot}
+                onClose={() => setShot(null)}
+                onCopy={async (png) => {
+                  const res = await window.api.copyImage(png);
+                  setShot(null);
+                  if (res && res.ok) {
+                    setShotDone(true);
+                    setTimeout(() => setShotDone(false), 2200);
+                  } else {
+                    toast.error(t('preview.copy_image_failed'));
+                  }
+                }}
+              />
+            </Suspense>
           )}
           {inPreview && mode === 'log' && (
             <pre

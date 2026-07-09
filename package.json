@@ -1,6 +1,6 @@
 {
   "name": "carcara-code",
-  "version": "0.1.6",
+  "version": "0.1.8",
   "description": "IDE minimalista para o Claude Code — cara de Lovable",
   "main": "main.js",
   "scripts": {
@@ -15,10 +15,13 @@
     "prepare": "husky",
     "pack:exe": "vite build && electron-builder --win nsis --publish never",
     "pack:appimage": "vite build && electron-builder --linux AppImage --publish never",
+    "pack:dmg": "vite build && electron-builder --mac dmg --universal --publish never",
     "test:i18n": "node scripts/i18n-parity.smoke.cjs",
     "test:csv": "node scripts/csv-smoke.cjs",
     "test:php": "node scripts/php-smoke.cjs",
-    "test:rail": "node scripts/rail-smoke.cjs"
+    "test:rail": "node scripts/rail-smoke.cjs",
+    "test:platform": "node scripts/platform-smoke.cjs",
+    "test:localpty": "node scripts/localpty-smoke.cjs"
   },
   "lint-staged": {
     "*.{js,jsx,cjs,mjs}": [
@@ -69,6 +72,18 @@
       "icon": "build/icon.png",
       "category": "Development",
       "artifactName": "CarcaraCode-${version}.AppImage"
+    },
+    "mac": {
+      "target": "dmg",
+      "icon": "build/icon.png",
+      "category": "public.app-category.developer-tools",
+      "hardenedRuntime": false,
+      "identity": null,
+      "artifactName": "CarcaraCode-${version}-universal.dmg",
+      "x64ArchFiles": "**/cpu-features/**"
+    },
+    "dmg": {
+      "title": "Carcará Code ${version}"
     }
   },
   "devDependencies": {
@@ -94,6 +109,8 @@
     "vitest": "^4.1.9"
   },
   "dependencies": {
+    "@assistant-ui/react": "^0.14.26",
+    "@assistant-ui/react-markdown": "^0.14.5",
     "@codemirror/lang-cpp": "^6.0.3",
     "@codemirror/lang-css": "^6.3.1",
     "@codemirror/lang-go": "^6.0.1",
@@ -133,6 +150,8 @@
     "detect-port": "^2.1.0",
     "electron-updater": "^6.8.9",
     "exceljs": "^4.4.0",
+    "fabric": "^7.4.0",
+    "fix-path": "^5.0.0",
     "highlight.js": "^11.11.1",
     "httpsnippet": "^3.0.10",
     "httpyac": "^6.16.7",

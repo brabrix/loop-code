@@ -35,6 +35,7 @@ import {
   Code2,
   FilePlus,
   FolderPlus,
+  FolderTree,
   Sheet,
   Music,
   Loader2,
@@ -75,6 +76,7 @@ import { useT } from '@/lib/i18n';
 import { isHtml } from '@/lib/htmlPreview';
 import { toast } from '@/lib/toast';
 import { MOVE_MIME } from '@/lib/dragPaths.js';
+import { normalizeRect, rectsIntersect } from '@/lib/marquee.js';
 
 // Preview de markdown renderizado (react-markdown + GFM + highlight), sob demanda.
 const Markdown = lazy(() => import('./Markdown.jsx'));
@@ -369,8 +371,18 @@ export function CodeView({ active, openRequest, visible = true }) {
   selItemsRef.current = selItems;
   // Âncora da seleção por faixa (Shift+clique seleciona da âncora até o item clicado).
   const [anchorPath, setAnchorPath] = useState(null);
+  // "Localizar na árvore": conjunto de pastas-ancestrais a forçar abertas até revelar o
+  // arquivo (cada TreeNode que se vê aqui se auto-abre; carga sob demanda cascateia).
+  const [revealPaths, setRevealPaths] = useState(null);
+  const revealTargetRef = useRef(null);
   const anchorRef = useRef(null);
   anchorRef.current = anchorPath;
+
+  // Seleção por arrastar (marquee) em área vazia da árvore: retângulo em coords de
+  // viewport enquanto arrasta; null quando não está arrastando. marqueeStart guarda o
+  // ponto inicial só em ref (não precisa re-render até passar do threshold).
+  const [marquee, setMarquee] = useState(null); // { x0, y0, x1, y1 }
+  const marqueeStart = useRef(null);
 
   // Calcula a faixa de itens visíveis entre dois paths, na ordem em que aparecem na
   // árvore (lê o DOM, então respeita pastas abertas/fechadas — só conta o que está visível).
@@ -429,6 +441,52 @@ export function CodeView({ active, openRequest, visible = true }) {
     }
     setSelected({ path: item.path, name: item.name, isDir: item.isDir });
   };
+
+  // Início do marquee: só em área vazia (fora de qualquer [data-tree-row], pra não
+  // roubar o dragstart nativo do DnD de mover) e só com o botão esquerdo. O gesto só
+  // vira seleção de fato depois que onMouseMoveWindow passar do threshold de 4px.
+  const onTreeMouseDown = (e) => {
+    if (query.trim()) return; // no modo busca a árvore vira lista de resultados, sem marquee
+    if (e.button !== 0) return;
+    if (e.target.closest('[data-tree-row]')) return;
+    marqueeStart.current = { x: e.clientX, y: e.clientY };
+  };
+
+  // Listeners em window (não no container) porque o mouse pode sair da área visível
+  // da árvore durante o arraste; só fazem algo enquanto marqueeStart.current existir.
+  // Lê o DOM ao vivo (como computeRange) em vez de depender de estado React da lista.
+  useEffect(() => {
+    const onMove = (e) => {
+      const start = marqueeStart.current;
+      if (!start) return;
+      if (Math.abs(e.clientX - start.x) < 4 && Math.abs(e.clientY - start.y) < 4) return;
+      const rect = normalizeRect(start.x, start.y, e.clientX, e.clientY);
+      setMarquee({ x0: start.x, y0: start.y, x1: e.clientX, y1: e.clientY });
+      const next = new Map();
+      document.querySelectorAll('[data-tree-row]').forEach((el) => {
+        const b = el.getBoundingClientRect();
+        if (rectsIntersect(rect, { left: b.left, top: b.top, right: b.right, bottom: b.bottom })) {
+          next.set(el.dataset.path, {
+            path: el.dataset.path,
+            name: el.dataset.name,
+            isDir: el.dataset.dir === '1',
+          });
+        }
+      });
+      setSelItems(next);
+    };
+    const onUp = () => {
+      marqueeStart.current = null;
+      setMarquee(null);
+    };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+    return () => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    };
+  }, []);
+
   const [refresh, setRefresh] = useState(0);
   const bump = () => setRefresh((n) => n + 1);
   // Observa o projeto ativo no disco: quando algo muda lá fora (ex.: o Claude cria
@@ -462,6 +520,45 @@ export function CodeView({ active, openRequest, visible = true }) {
       clearTimeout(t);
     };
   }, [query, active, refresh]);
+
+  // ── Escopo por projeto ──────────────────────────────────────────────────────
+  // O CodeView fica MONTADO o tempo todo (não remonta ao trocar de projeto, pra não
+  // perder as abas ao alternar Código ↔ Preview). Sem isto, o estado do editor (abas,
+  // busca, seleção da árvore) seria compartilhado por TODOS os projetos e vazaria de um
+  // pro outro. Guardamos um snapshot por projeto e trocamos quando `active.path` muda —
+  // aqui no corpo do render (padrão do React pra derivar estado de uma prop), pra nunca
+  // chegar a pintar o estado do projeto errado.
+  const stashRef = useRef(new Map()); // projectPath -> snapshot do editor
+  const [projectPath, setProjectPath] = useState(active?.path ?? null);
+  if ((active?.path ?? null) !== projectPath) {
+    if (projectPath != null) {
+      stashRef.current.set(projectPath, {
+        tabs,
+        activePath,
+        rawEnv,
+        mdEdit,
+        htmlPreview,
+        csvGrid,
+        query,
+        selected,
+        selItems,
+        anchorPath,
+      });
+    }
+    const snap = active?.path != null ? stashRef.current.get(active.path) : null;
+    setProjectPath(active?.path ?? null);
+    setTabs(snap?.tabs ?? []);
+    setActivePath(snap?.activePath ?? null);
+    setRawEnv(snap?.rawEnv ?? new Set());
+    setMdEdit(snap?.mdEdit ?? new Set());
+    setHtmlPreview(snap?.htmlPreview ?? new Set());
+    setCsvGrid(snap?.csvGrid ?? new Set());
+    setQuery(snap?.query ?? '');
+    setSelected(snap?.selected ?? null);
+    setSelItems(snap?.selItems ?? new Map());
+    setAnchorPath(snap?.anchorPath ?? null);
+  }
+
   const [treeDragOver, setTreeDragOver] = useState(false);
   // Arrastar-soltar INTERNO (mover dentro da árvore). dragItemsRef guarda os itens
   // sendo arrastados (1 ou vários, da seleção); dragActive liga o realce de alvo.
@@ -555,7 +652,11 @@ export function CodeView({ active, openRequest, visible = true }) {
     dragItemsRef.current = items;
     setDragActive(true);
     try {
-      e.dataTransfer.effectAllowed = 'move';
+      // 'copyMove' (não só 'move'): mover pra pasta usa dropEffect='move' e
+      // soltar no terminal usa 'copy' (ChatPanel). Se a fonte só permitisse
+      // 'move', o Chromium anula o drop 'copy' (vira 'none') e o evento 'drop'
+      // nunca dispara — a borda de realce aparece, mas nada cola.
+      e.dataTransfer.effectAllowed = 'copyMove';
       e.dataTransfer.setData(MOVE_MIME, items.map((i) => i.path).join('\n'));
     } catch {}
   };
@@ -578,16 +679,70 @@ export function CodeView({ active, openRequest, visible = true }) {
     setDragActive(false);
   };
 
-  const openMenu = (e, item) => {
+  const openMenu = (e, item, extra) => {
     e.preventDefault();
     e.stopPropagation();
     const x = Math.min(e.clientX, window.innerWidth - 220);
     const y = Math.min(e.clientY, window.innerHeight - 300);
-    setMenu({ x, y, item });
+    setMenu({ x, y, item, ...(extra || {}) });
   };
+
+  // "Localizar na árvore": sai da busca, abre as pastas-ancestrais até o arquivo e o
+  // seleciona. Não mexe no que já está aberto — só garante o caminho até o alvo.
+  const revealInTree = (it) => {
+    const target = it.path;
+    const root = active?.path || '';
+    const ancestors = new Set();
+    let p = parentDir(target);
+    while (p && p !== root && p.length > root.length && p.startsWith(root)) {
+      ancestors.add(p);
+      p = parentDir(p);
+    }
+    setQuery(''); // sai do modo busca → a árvore aparece
+    const one = { path: target, name: it.name, isDir: false };
+    setSelItems(new Map([[target, one]]));
+    setSelected(one);
+    setAnchorPath(target);
+    revealTargetRef.current = target;
+    setRevealPaths(ancestors);
+  };
+
+  // Depois de acionar o "Localizar": as pastas abrem em cascata (carga sob demanda),
+  // então esperamos a linha do alvo surgir no DOM pra rolar até ela; aí limpamos o
+  // revealPaths (cada nó já fixou o próprio open=true, não fecham sozinhos).
+  useEffect(() => {
+    if (!revealPaths || !revealTargetRef.current) return;
+    let tries = 0;
+    let raf = 0;
+    const tick = () => {
+      const target = revealTargetRef.current;
+      if (!target) return;
+      let el = null;
+      for (const r of document.querySelectorAll('[data-tree-row]')) {
+        if (r.dataset.path === target) {
+          el = r;
+          break;
+        }
+      }
+      if (el) {
+        el.scrollIntoView({ block: 'center' });
+        revealTargetRef.current = null;
+        setRevealPaths(null);
+        return;
+      }
+      if (tries++ < 60) raf = requestAnimationFrame(tick);
+      else {
+        revealTargetRef.current = null;
+        setRevealPaths(null);
+      }
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [revealPaths]);
 
   const actions = {
     reveal: (it) => window.api.revealItem(it.path),
+    revealInTree,
     copyPath: (it) => window.api.copyText(it.path),
     cut: (it) => setClip({ path: it.path, name: it.name, isDir: it.isDir, mode: 'cut' }),
     copy: (it) => setClip({ path: it.path, name: it.name, isDir: it.isDir, mode: 'copy' }),
@@ -935,6 +1090,7 @@ export function CodeView({ active, openRequest, visible = true }) {
             )}
             <div
               className="min-h-0 flex-1 overflow-auto py-1.5"
+              onMouseDown={onTreeMouseDown}
               onContextMenu={(e) => {
                 // Clique direito na área em branco: menu da raiz do projeto (só Colar).
                 openMenu(e, { path: active.path, name: active.name, isDir: true, root: true });
@@ -953,6 +1109,16 @@ export function CodeView({ active, openRequest, visible = true }) {
                         key={r.path}
                         type="button"
                         onClick={() => openFile({ path: r.path, name: r.name })}
+                        onContextMenu={(e) => {
+                          e.preventDefault();
+                          // Menu completo (igual ao da árvore) — aditivo. `fromSearch`
+                          // acrescenta o "Localizar na árvore" no topo, específico da busca.
+                          openMenu(
+                            e,
+                            { path: r.path, name: r.name, isDir: false },
+                            { fromSearch: true },
+                          );
+                        }}
                         title={r.rel}
                         className={cn(
                           'flex w-full items-center gap-1.5 px-2 py-[3px] text-left text-[13px] hover:bg-muted',
@@ -983,6 +1149,7 @@ export function CodeView({ active, openRequest, visible = true }) {
                 <FileTreeCtx.Provider
                   value={{
                     selectedSet: selItems,
+                    revealPaths,
                     activePath,
                     onSelect: openFile,
                     onNodeClick,
@@ -1006,6 +1173,21 @@ export function CodeView({ active, openRequest, visible = true }) {
                 </FileTreeCtx.Provider>
               )}
             </div>
+            {marquee &&
+              (() => {
+                const r = normalizeRect(marquee.x0, marquee.y0, marquee.x1, marquee.y1);
+                return (
+                  <div
+                    className="pointer-events-none fixed z-50 border border-primary bg-primary/10"
+                    style={{
+                      left: r.left,
+                      top: r.top,
+                      width: r.right - r.left,
+                      height: r.bottom - r.top,
+                    }}
+                  />
+                );
+              })()}
           </>
         ) : (
           <div className="px-3 py-1.5 text-sm text-muted-foreground">{t('tree.empty')}</div>
@@ -1622,6 +1804,11 @@ function TreeNode({ item, depth }) {
   const ctx = useContext(FileTreeCtx);
   const [open, setOpen] = useState(false);
   const [over, setOver] = useState(false);
+  // "Localizar na árvore": se esta pasta está no caminho até o alvo, abre-se. Fica
+  // com open=true fixo (o usuário pode fechar depois normalmente).
+  useEffect(() => {
+    if (item.isDir && ctx.revealPaths?.has(item.path)) setOpen(true);
+  }, [ctx.revealPaths, item.isDir, item.path]);
   const isSel =
     ctx.selectedSet?.has(item.path) ||
     (ctx.selectedSet?.size === 0 && ctx.activePath === item.path);
@@ -1777,7 +1964,7 @@ function FileMenu({ menu, clip, actions, selItems, onClose }) {
     };
   }, [menu, onClose]);
   if (!menu) return null;
-  const { x, y, item } = menu;
+  const { x, y, item, fromSearch } = menu;
   const run = (fn) => () => {
     onClose();
     fn(item);
@@ -1790,6 +1977,17 @@ function FileMenu({ menu, clip, actions, selItems, onClose }) {
       className="fixed z-50 min-w-[200px] overflow-hidden rounded-md border bg-background py-1 shadow-md"
       style={{ left: x, top: y }}
     >
+      {fromSearch && (
+        // Só nos resultados da busca: leva o arquivo pra sua posição na árvore.
+        <>
+          <MenuItem
+            icon={FolderTree}
+            label={t('contextMenu.revealInTree')}
+            onClick={run(actions.revealInTree)}
+          />
+          <div className="my-1 border-t" />
+        </>
+      )}
       {item.root ? (
         // Área em branco: criar na raiz do projeto, ou colar.
         <>
@@ -1802,6 +2000,12 @@ function FileMenu({ menu, clip, actions, selItems, onClose }) {
             icon={FolderPlus}
             label={t('contextMenu.newFolder')}
             onClick={run(actions.newFolder)}
+          />
+          <div className="my-1 border-t" />
+          <MenuItem
+            icon={ExternalLink}
+            label={t('contextMenu.reveal')}
+            onClick={run(actions.reveal)}
           />
           <div className="my-1 border-t" />
           <MenuItem

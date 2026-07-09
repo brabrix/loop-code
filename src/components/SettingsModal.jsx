@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { lazy, Suspense, useEffect, useState } from 'react';
 import {
   Sun,
   Moon,
@@ -22,6 +22,9 @@ import {
   HardDrive,
   RefreshCw,
   WrapText,
+  Search,
+  ArrowDownAZ,
+  ArrowUpAZ,
 } from 'lucide-react';
 import { useTheme } from '@/lib/theme.jsx';
 import { Input } from './ui/input.jsx';
@@ -30,10 +33,18 @@ import { Button } from './ui/button.jsx';
 import { useDependencyStatus, DependencyCards } from './SetupScreen.jsx';
 import { cn } from '@/lib/utils';
 import { AI_OPTIONS, CliBadge } from '@/lib/aiOptions.jsx';
+import { filterAndSortProjects } from '@/lib/projectFilter.js';
 import ygorPhoto from '@/assets/ygor/ygor-andrade.jpg';
 import { useT, useLang } from '@/lib/i18n';
 import { updateView } from '@/lib/updateView';
 import { useLayout } from '@/lib/layoutContext.jsx';
+import { useChatMode } from '@/lib/chatModeContext.jsx';
+// Notas de versão (aba "Novidades"): o CHANGELOG.md da raiz vira texto em build-time via
+// import ?raw do Vite — sem IPC, sem duplicar o arquivo. Markdown.jsx é lazy (mesmo padrão
+// do ChatPanel) pra não puxar react-markdown/highlight.js pro bundle inicial do app.
+import changelogText from '../../CHANGELOG.md?raw';
+
+const Markdown = lazy(() => import('./Markdown.jsx'));
 
 // Ícones de marca em SVG inline — o lucide removeu os logos de marca (questão de trademark),
 // então desenhamos aqui. Herdam currentColor e tamanho via className do <span> que os envolve.
@@ -169,6 +180,7 @@ export function SettingsModal({
   const t = useT();
   const { lang, setLang } = useLang();
   const { railSide, claudeSide, setPreset } = useLayout();
+  const { chatMode, setChatMode } = useChatMode();
   const [tab, setTab] = useState(initialTab);
   // Quando reabre apontando pra uma aba específica (ex.: clique na versão do rail).
   useEffect(() => {
@@ -176,6 +188,8 @@ export function SettingsModal({
   }, [open, initialTab]);
   const [projects, setProjects] = useState([]);
   const [sel, setSel] = useState({}); // path -> { ais, custom }
+  const [aiQuery, setAiQuery] = useState(''); // filtro de busca da lista "IA por projeto"
+  const [aiSort, setAiSort] = useState('default'); // 'default' | 'asc' | 'desc'
   const [zoom, setZoom] = useState(1); // fator de zoom da janela (1 = 100%)
   const [notify, setNotify] = useState(true); // notificar quando o Claude termina
   const [autoSave, setAutoSave] = useState(false); // salvar arquivos do editor automaticamente
@@ -202,6 +216,10 @@ export function SettingsModal({
       return next;
     });
   };
+
+  // Alterna o painel esquerdo entre terminal (cli) e chat assistant-ui (beta). O contexto
+  // (chatModeContext) já grava no config.json via preload e atualiza o App ao vivo.
+  const toggleChatMode = () => setChatMode(chatMode === 'chat' ? 'cli' : 'chat');
 
   // Autosave é só do renderer (o CodeView lê e salva). Guarda em localStorage e avisa
   // o CodeView na hora via evento — assim ligar/desligar vale sem reabrir o editor.
@@ -276,6 +294,10 @@ export function SettingsModal({
     });
   };
 
+  // Lista visível da aba "IA por projeto": filtro por busca + ordenação por nome (pura, testada
+  // em src/lib/projectFilter.js). 'default' preserva a ordem que veio do Rail.
+  const visibleProjects = filterAndSortProjects(projects, { query: aiQuery, sort: aiSort });
+
   return (
     <div className="fixed inset-0 z-50 flex bg-background">
       {/* Navegação lateral */}
@@ -303,6 +325,13 @@ export function SettingsModal({
         <TabButton active={tab === 'language'} onClick={() => setTab('language')} icon={<Globe />}>
           {t('settings.tabLanguage')}
         </TabButton>
+        <TabButton
+          active={tab === 'whatsnew'}
+          onClick={() => setTab('whatsnew')}
+          icon={<Sparkles />}
+        >
+          {t('settings.tabWhatsNew')}
+        </TabButton>
         <div className="my-1.5 border-t" />
         <TabButton active={tab === 'about'} onClick={() => setTab('about')} icon={<Heart />}>
           {t('settings.tabAbout')}
@@ -323,9 +352,11 @@ export function SettingsModal({
                     ? t('settings.tabDeps')
                     : tab === 'language'
                       ? t('settings.tabLanguage')
-                      : tab === 'about'
-                        ? t('settings.tabAbout')
-                        : t('settings.tabAppearance')}
+                      : tab === 'whatsnew'
+                        ? t('settings.tabWhatsNew')
+                        : tab === 'about'
+                          ? t('settings.tabAbout')
+                          : t('settings.tabAppearance')}
           </h1>
           <div className="flex-1" />
           <button
@@ -347,21 +378,85 @@ export function SettingsModal({
                 {t('settings.aiIntroPost')}
               </p>
 
+              {/* Modo de chat (beta): terminal cru vs UI assistant-ui. Aditivo — o padrão é o
+                  terminal; ligar só troca o painel esquerdo, o resto do app não muda. */}
+              <div className="mt-5 flex items-start justify-between gap-4 rounded-lg border p-4">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2 text-[13px] font-medium">
+                    Chat em vez do terminal
+                    <span className="rounded bg-secondary px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-primary">
+                      beta
+                    </span>
+                  </div>
+                  <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+                    Mostra um painel de chat em HTML/CSS no lugar do terminal do Claude Code. Ainda
+                    em construção — o terminal continua sendo o modo completo e volta a um clique.
+                  </p>
+                </div>
+                <Switch
+                  checked={chatMode === 'chat'}
+                  onCheckedChange={toggleChatMode}
+                  title={chatMode === 'chat' ? 'Usando chat' : 'Usando terminal'}
+                  className="mt-0.5"
+                />
+              </div>
+
               <div className="mt-5 flex flex-col gap-3">
                 {projects.length === 0 && (
                   <div className="rounded-lg border border-dashed p-8 text-center text-sm text-muted-foreground">
                     {t('settings.aiEmpty')}
                   </div>
                 )}
-                {projects.map((p) => {
+                {projects.length > 1 && (
+                  <div className="flex items-center gap-2">
+                    <div className="relative flex-1">
+                      <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+                      <input
+                        value={aiQuery}
+                        onChange={(e) => setAiQuery(e.target.value)}
+                        placeholder={t('settings.aiSearchPlaceholder')}
+                        className="w-full rounded-md border bg-background py-1.5 pl-8 pr-2 text-sm outline-none focus:ring-1 focus:ring-primary"
+                      />
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setAiSort((s) => (s === 'asc' ? 'desc' : s === 'desc' ? 'default' : 'asc'))
+                      }
+                      title={t(
+                        aiSort === 'asc'
+                          ? 'settings.aiSortAsc'
+                          : aiSort === 'desc'
+                            ? 'settings.aiSortDesc'
+                            : 'settings.aiSortDefault',
+                      )}
+                      className={cn(
+                        'grid size-8 shrink-0 place-items-center rounded-md border transition-colors hover:bg-muted',
+                        aiSort !== 'default' && 'border-primary text-primary',
+                      )}
+                    >
+                      {aiSort === 'desc' ? (
+                        <ArrowUpAZ className="size-4" />
+                      ) : (
+                        <ArrowDownAZ className="size-4" />
+                      )}
+                    </button>
+                  </div>
+                )}
+                {visibleProjects.length === 0 && projects.length > 0 && (
+                  <div className="rounded-lg border border-dashed p-8 text-center text-sm text-muted-foreground">
+                    {t('settings.aiNoResults')}
+                  </div>
+                )}
+                {visibleProjects.map((p) => {
                   const cur = sel[p.path] || { ais: ['claude'], custom: '' };
                   return (
                     <div key={p.path} className="rounded-lg border p-3">
                       <div className="mb-2.5 flex items-center gap-2">
                         {p.icon ? (
-                          <img src={p.icon} alt="" className="size-5 rounded-sm object-contain" />
+                          <img src={p.icon} alt="" className="size-8 rounded-md object-contain" />
                         ) : (
-                          <span className="grid size-5 place-items-center rounded-sm bg-muted text-[11px] font-semibold uppercase">
+                          <span className="grid size-8 place-items-center rounded-md bg-muted text-sm font-semibold uppercase">
                             {p.name?.[0] || '?'}
                           </span>
                         )}
@@ -670,6 +765,20 @@ export function SettingsModal({
             </div>
           )}
 
+          {tab === 'whatsnew' && (
+            <div className="mx-auto max-w-3xl">
+              <Suspense
+                fallback={
+                  <pre className="whitespace-pre-wrap text-[13px] leading-relaxed text-muted-foreground">
+                    {changelogText}
+                  </pre>
+                }
+              >
+                <Markdown text={changelogText} />
+              </Suspense>
+            </div>
+          )}
+
           {tab === 'about' && (
             <div className="mx-auto max-w-3xl">
               {/* Versão atual — o "charme" de produto. */}
@@ -680,6 +789,23 @@ export function SettingsModal({
                 <span className="font-mono text-sm font-semibold text-foreground">
                   Carcará Code v{appVersion || '—'}
                 </span>
+              </div>
+              {/* Contribuir: link pro repo público (PR) */}
+              <div className="mb-5 rounded-lg border border-dashed p-4">
+                <p className="text-sm font-semibold text-foreground">
+                  {t('settings.contributeTitle')}
+                </p>
+                <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+                  {t('settings.contributeBody')}
+                </p>
+                <button
+                  type="button"
+                  onClick={() => openLink('https://github.com/Yg0rAndrade/carcara-code')}
+                  className="mt-3 inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-[13px] font-medium transition-colors hover:bg-muted"
+                >
+                  <GithubIcon className="size-4" />
+                  {t('settings.contributeButton')}
+                </button>
               </div>
               {/* Atualização: checagem manual + status (espelha a pílula). */}
               {(() => {

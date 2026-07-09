@@ -98,6 +98,19 @@ contextBridge.exposeInMainWorld('api', {
   getLang: () => ipcRenderer.invoke('lang:get'),
   setLang: (lang) => ipcRenderer.invoke('lang:set', { lang }),
 
+  // Modo do painel de chat: 'cli' (terminal real, padrão) ou 'chat' (UI assistant-ui)
+  getChatMode: () => ipcRenderer.invoke('chatMode:get'),
+  setChatMode: (mode) => ipcRenderer.invoke('chatMode:set', { mode }),
+
+  // Ponte de chat headless (assistant-ui ↔ `claude -p` stream-json). Os eventos chegam
+  // pelo push 'chat:event' via on(...). Additivo — não substitui o terminal (term:*).
+  chatStart: (sessionId, projectPath, resumeId) =>
+    ipcRenderer.invoke('chat:start', { sessionId, projectPath, resumeId }),
+  chatSend: (sessionId, projectPath, text, cli, images) =>
+    ipcRenderer.invoke('chat:send', { sessionId, projectPath, text, cli, images }),
+  chatAbort: (sessionId) => ipcRenderer.send('chat:abort', { sessionId }),
+  chatClose: (sessionId) => ipcRenderer.invoke('chat:close', { sessionId }),
+
   // Terminal livre (shell comum)
   shellEnsure: (projectPath, cols, rows) =>
     ipcRenderer.invoke('shell:ensure', { projectPath, cols, rows }),
@@ -210,9 +223,10 @@ contextBridge.exposeInMainWorld('api', {
   pasteItem: (srcPath, destDir, move) => ipcRenderer.invoke('fs:paste', { srcPath, destDir, move }),
   createItem: (destDir, name, isDir) => ipcRenderer.invoke('fs:create', { destDir, name, isDir }),
   copyText: (text) => ipcRenderer.invoke('clip:write', { text }),
+  copyImage: (dataURL) => ipcRenderer.invoke('clip:writeImage', { dataURL }),
   readText: () => ipcRenderer.invoke('clip:read'),
-  capturePreview: (webContentsId, rect) =>
-    ipcRenderer.invoke('preview:capture', { webContentsId, rect }),
+  capturePreview: (webContentsId, rect, opts) =>
+    ipcRenderer.invoke('preview:capture', { webContentsId, rect, ...(opts || {}) }),
   openExternal: (url) => ipcRenderer.invoke('shell:openExternal', { url }),
 
   // Drag and drop de arquivos

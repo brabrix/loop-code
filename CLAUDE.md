@@ -17,6 +17,29 @@ com chat e preview lado a lado. Usa a assinatura do Claude, nunca a API.
 - Edições em `src/` só aparecem depois de `npm run build` (o app carrega de `dist/`).
 - O app pode estar rodando com uma sessão viva do Claude Code — não force relaunch sem confirmar.
 - Para abrir o Electron de dentro de um terminal do Claude, limpe `ELECTRON_RUN_AS_NODE`.
+- Ao lançar uma nova versão, atualizar `CHANGELOG.md` (padrão Keep a Changelog) com o
+  diff do que mudou da versão anterior para a atual, antes do commit `chore(release): x.y.z`.
+
+## DIFERENÇAS DE PLATAFORMA (Win/Mac/Linux)
+
+Os módulos do processo main moram em `electron/` (ex.: `electron/platform.cjs`,
+`electron/php-runtime.cjs`, `electron/remote/`); só `main.js` e `preload.js` ficam na raiz.
+
+Nunca espalhe `process.platform` pelo código. Diferença de SO vai em `electron/platform.cjs`
+(módulo canônico, estilo `platform.ts` do VS Code):
+
+- É um **valor** (nome de shell, extensão de binário, comando de "abrir", URL de asset)?
+  → vira chave na tabela `TABLE` de `electron/platform.cjs`. Adicionar suporte a um SO = preencher
+  a coluna dele.
+- É **comportamento** (resolver PATH, montar menu, escolher login shell)? → vira uma
+  função em `electron/platform.cjs` que aceita `platform` como parâmetro (default `process.platform`),
+  para ser testável em qualquer SO via `scripts/platform-smoke.cjs`.
+- Comportamento que precisa de `fs`/`child_process` (ex.: download/extração por SO) mora
+  no módulo que já tem Node (ex.: `electron/php-runtime.cjs`), ramificando por `process.platform`,
+  mas com as partes de decisão (asset, nome de binário) como funções puras testáveis.
+
+Regra de ouro: se você escreveu `process.platform === '...'` fora de `electron/platform.cjs`,
+provavelmente há um lugar melhor. O caminho Windows nunca deve regredir ao adicionar Mac/Linux.
 
 ## AUTO-APRENDIZADO
 

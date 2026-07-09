@@ -33,6 +33,11 @@ import { cn } from '@/lib/utils';
 import { computeZone, ZONE_STYLE } from '@/lib/dropZones.js';
 import { AiPicker } from './AiPicker.jsx';
 import { MOVE_MIME, formatDroppedPaths } from '@/lib/dragPaths.js';
+import { useChatMode } from '@/lib/chatModeContext.jsx';
+import { AssistantChat } from './AssistantChat.jsx';
+
+// IAs com adapter de chat na ponte (chat-cli.cjs). As demais seguem no terminal xterm.
+const CHAT_CLIS = ['claude', 'codex', 'agy'];
 
 // Preview de markdown completo (react-markdown + GFM + highlight.js), carregado
 // sob demanda pra ficar fora do bundle de boot. Enquanto baixa, cai no PromptMd leve.
@@ -735,6 +740,7 @@ function SessionActivityDot({ state }) {
 
 export function ChatPanel({ activeProject, controlsRef, onActiveSessionChange }) {
   const t = useT();
+  const { chatMode } = useChatMode();
   const { terminalTheme } = useTheme();
   const themeRef = useRef(terminalTheme);
   const hostRef = useRef(null);
@@ -743,6 +749,13 @@ export function ChatPanel({ activeProject, controlsRef, onActiveSessionChange })
 
   const [sessions, setSessions] = useState([]); // todas as sessões do projeto: [{ id, name }]
   const [projectAis, setProjectAis] = useState(null); // { ais, custom } do projeto ativo
+
+  // Uma sessão renderiza como CHAT (assistant-ui) em vez de terminal xterm quando o modo
+  // 'chat' está ligado E a IA da sessão tem adapter de chat (claude/codex/agy — ver
+  // chat-cli.cjs). Outras CLIs (opencode/custom) seguem no terminal. Additivo — abas,
+  // seletor de IA e layout ficam.
+  const cliOf = (sid) => sessions.find((s) => s.id === sid)?.cli;
+  const isChatSession = (sid) => chatMode === 'chat' && CHAT_CLIS.includes(cliOf(sid));
   // Atividade do Claude POR SESSÃO: sessionId -> 'working' | 'asking' | 'attention'.
   // É o detalhe fino (qual aba) que o rail (agregado por projeto) não mostra.
   const [sessionActivity, setSessionActivity] = useState({});
@@ -1014,6 +1027,12 @@ export function ChatPanel({ activeProject, controlsRef, onActiveSessionChange })
       for (const sid of p.tabs) {
         const isActive = sid === p.active;
         let te = termsRef.current.get(sid);
+        // Sessão em modo chat: não cria/mostra o xterm (o overlay do AssistantChat cobre
+        // o container). Esconde um terminal já criado, se existir, sem matá-lo.
+        if (isActive && isChatSession(sid)) {
+          if (te) te.el.style.display = 'none';
+          continue;
+        }
         if (!te && isActive) {
           const meta = sessions.find((s) => s.id === sid);
           if (!meta || !meta.cli) {
@@ -1028,7 +1047,7 @@ export function ChatPanel({ activeProject, controlsRef, onActiveSessionChange })
       }
     }
     scheduleRefit();
-  }, [layout, activeProject, sessions, projectAis]);
+  }, [layout, activeProject, sessions, projectAis, chatMode]);
 
   // Reajusta os terminais visíveis quando o painel inteiro muda de tamanho.
   useEffect(() => {
@@ -1367,6 +1386,17 @@ export function ChatPanel({ activeProject, controlsRef, onActiveSessionChange })
             }
             return null;
           })()}
+          {/* Sessão em modo chat: overlay do AssistantChat por cima do container (o xterm
+              fica escondido). Só pra sessão ativa e IA = claude. z abaixo do overlay de drop. */}
+          {isChatSession(p.active) && (
+            <div className="absolute inset-0 z-10 flex flex-col bg-background">
+              <AssistantChat
+                sessionId={p.active}
+                projectPath={activeProject}
+                cli={cliOf(p.active)}
+              />
+            </div>
+          )}
           {dragSid && (
             <div
               className="absolute inset-0 z-20"

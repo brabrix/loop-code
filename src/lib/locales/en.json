@@ -170,6 +170,7 @@
     "newFolder": "New folder",
     "paste": "Paste",
     "reveal": "Reveal in File Explorer",
+    "revealInTree": "Reveal in tree",
     "cut": "Cut",
     "copy": "Copy",
     "copyPath": "Copy path",
@@ -340,6 +341,9 @@
     "back": "Back",
     "forward": "Forward",
     "reload": "Reload page",
+    "reload_hard": "Hard reload (ignore cache)",
+    "capture_failed": "Couldn't capture the preview",
+    "copy_image_failed": "Couldn't copy the image",
     "url_placeholder": "Preview",
     "open_browser": "Open in default browser",
     "find_placeholder": "Find in page",
@@ -383,6 +387,16 @@
     "claude_prompt_6": "3. Make sure it listens on http://localhost on an accessible port.",
     "claude_prompt_7": "",
     "claude_prompt_8": "Tell me what was missing and fix it."
+  },
+  "annotator": {
+    "pen": "Pen",
+    "rect": "Rectangle",
+    "arrow": "Arrow",
+    "text": "Text",
+    "undo": "Undo",
+    "cancel": "Cancel",
+    "copy": "Copy",
+    "textPlaceholder": "Text"
   },
   "mcp": {
     "panel": {
@@ -558,11 +572,17 @@
     "tabDeps": "Dependencies",
     "tabLanguage": "Language",
     "tabAbout": "About & credits",
+    "tabWhatsNew": "What's new",
     "close": "Close (Esc)",
     "aiIntroPre": "Choose which AI CLI each project uses. Applies to the ",
     "aiNewSessions": "new sessions",
     "aiIntroPost": " opened in that project.",
     "aiEmpty": "No projects yet. Add a project from the sidebar.",
+    "aiSearchPlaceholder": "Search project…",
+    "aiSortDefault": "Default order",
+    "aiSortAsc": "Name (A→Z)",
+    "aiSortDesc": "Name (Z→A)",
+    "aiNoResults": "No project matches your search.",
     "aiCustomPlaceholder": "CLI command (e.g., my-cli --flag)",
     "aiClaudeDesc": "Your Claude subscription (not the API).",
     "aiCodexDesc": "ChatGPT/OpenAI in the terminal · npm i -g @openai/codex.",
@@ -620,7 +640,10 @@
     "layoutPresetRL": "Sidebar right, Claude left",
     "layoutPresetRR": "Sidebar and Claude on the right",
     "aboutVersionLabel": "Installed version",
-    "checkUpdates": "Check for updates"
+    "checkUpdates": "Check for updates",
+    "contributeTitle": "Want to submit a fix?",
+    "contributeBody": "Carcará Code is open source. If you fixed a bug or improved something, open a Pull Request on GitHub — your contribution is welcome.",
+    "contributeButton": "Contribute on GitHub"
   },
   "aiPicker": {
     "title": "Choose this tab's AI",

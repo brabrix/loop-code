@@ -12,7 +12,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const XLSX = require('xlsx');
-const { parseCsvBuffer } = require('../csv-core.cjs');
+const { parseCsvBuffer } = require('../electron/csv-core.cjs');
 
 function assert(cond, msg) {
   if (!cond) throw new Error('ASSERT: ' + msg);
