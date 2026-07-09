@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="logo.svg" alt="Carcará Code" width="110">
+  <img src="imgs/logo.svg" alt="Carcará Code" width="110">
 </p>
 
 <h1 align="center">Carcará Code</h1>
