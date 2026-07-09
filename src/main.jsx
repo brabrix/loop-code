@@ -11,6 +11,22 @@ window.addEventListener('error', (e) => {
   console.error('GLOBAL ERROR:', e.message, '\n', e.error && e.error.stack);
 });
 
+// Chunk lazy que falha ao carregar = o dist/ foi reconstruído embaixo da janela aberta
+// (o hash do arquivo muda a cada build; a index.html em memória aponta pro nome antigo,
+// que já não existe → "Failed to fetch dynamically imported module"). O Vite dispara
+// 'vite:preloadError' nesse caso. Recarrega UMA vez pra buscar a index/chunks novos —
+// reconecta às sessões vivas (os pty ficam no main, iguais ao botão Recarregar). O
+// throttle evita loop apertado se o reload não resolver (ex.: build quebrado): aí deixa
+// o ErrorBoundary aparecer com o "Recarregar" manual.
+window.addEventListener('vite:preloadError', (e) => {
+  const KEY = 'preloadReloadAt';
+  const last = Number(sessionStorage.getItem(KEY) || 0);
+  if (Date.now() - last < 10000) return;
+  e.preventDefault();
+  sessionStorage.setItem(KEY, String(Date.now()));
+  window.location.reload();
+});
+
 createRoot(document.getElementById('root')).render(
   <ThemeProvider>
     <LanguageProvider>

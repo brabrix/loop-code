@@ -27,6 +27,7 @@ Notas de versão do Carcará Code. As versões seguem versionamento semântico
 
 ### Interno
 
+- Robustez: se um painel lazy (Git/API/MCP/Quadro/Código) falha ao carregar o chunk porque o `dist/` foi reconstruído embaixo da janela aberta (hash mudou), o app **recarrega sozinho uma vez** (via `vite:preloadError`) em vez de mostrar "Failed to fetch dynamically imported module". Throttle evita loop
 - Lógica pura extraída e testada (vitest): `errorReport`, `projectFilter`, `changelog`, `marquee`
 - i18n em paridade (pt/en) para todos os textos novos, incluindo o fluxo de anotação
 - Fabric.js isolado em chunk próprio (code-split), fora do bundle de boot
