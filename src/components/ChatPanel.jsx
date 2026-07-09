@@ -884,6 +884,18 @@ export function ChatPanel({ activeProject, controlsRef, onActiveSessionChange })
     };
   }, [activeProject]);
 
+  // Trocar a IA do projeto nas Configurações relê o cache local (projectAis), senão a
+  // próxima aba nova ainda subiria a IA antiga (o main avisa via 'ai:changed').
+  useEffect(() => {
+    if (!activeProject) return;
+    return window.api.on('ai:changed', ({ projectPath }) => {
+      if (projectPath !== activeProject) return;
+      window.api
+        .getAi(activeProject)
+        .then((ai) => setProjectAis(ai || { ais: ['claude'], custom: '' }));
+    });
+  }, [activeProject]);
+
   // Publica pro App qual sessão de chat está ativa (a do pane focado; senão a do
   // primeiro pane), pra painéis fora do chat — como o de Tarefas — seguirem a aba
   // em foco. Ref pro callback não forçar re-execução quando o App re-renderiza.

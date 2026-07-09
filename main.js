@@ -714,6 +714,10 @@ ipcMain.handle('ai:set', (evt, { projectPath, ais, custom }) => {
   const list = Array.isArray(ais) ? ais.filter((k) => aiCli.VALID_CLIS.includes(k)) : [];
   c.projectCli[projectPath] = { ais: list.length ? list : ['claude'], custom: custom || '' };
   saveConfig(c);
+  // Avisa o renderer: o ChatPanel guarda os AIs do projeto em cache (só relê ao trocar
+  // de projeto), então sem isto trocar a IA nas Configs não valia pra próxima aba nova
+  // até reabrir o projeto/app.
+  safeSend('ai:changed', { projectPath });
   return { ok: true };
 });
 ipcMain.handle('session:setCli', (evt, { projectPath, sessionId, cli }) => {
