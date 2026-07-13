@@ -53,13 +53,13 @@ jobs:
       - name: Publicar o .dmg como artefato
         uses: actions/upload-artifact@v4
         with:
-          name: CarcaraCode-macOS-${{ matrix.arch }}
+          name: LoopCode-macOS-${{ matrix.arch }}
           path: release/*.dmg
           retention-days: 30
           if-no-files-found: error
 
       # Só em tags: anexa o .dmg desta arch à MESMA página de Release (upsert). Os dois
-      # jobs somam CarcaraCode-<versão>-x64.dmg e -arm64.dmg. (Sem latest-mac.yml: os dois
+      # jobs somam LoopCode-<versão>-x64.dmg e -arm64.dmg. (Sem latest-mac.yml: os dois
       # jobs gerariam o mesmo nome e um sobrescreveria o outro; auto-update do Mac não é
       # usado por ora.)
       - name: Publicar Release (somente em tags)

@@ -39,7 +39,7 @@ jobs:
       - name: Publicar o AppImage como artefato
         uses: actions/upload-artifact@v4
         with:
-          name: CarcaraCode-Linux
+          name: LoopCode-Linux
           path: release/*.AppImage
           retention-days: 30
           if-no-files-found: error

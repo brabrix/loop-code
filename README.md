@@ -1,122 +1,114 @@
-<p align="center">
-  <img src="imgs/logo.svg" alt="Carcará Code" width="110">
-</p>
+# Loop Code
 
-<h1 align="center">Carcará Code</h1>
+**IDE orientada a workflows de codificação com agentes de inteligência artificial.**
 
-<p align="center">
-  <strong>Infinitos projetos, um único voo.</strong><br>
-  IDE minimalista para o <a href="https://claude.ai/code">Claude Code</a> (ou qualquer IA com CLI). Um ícone por projeto, chat e preview lado a lado.
-</p>
+> An AI coding workflow IDE for planning, implementing, testing and validating
+> software tasks.
 
-<p align="center">
-  <a href="../../releases"><img src="https://img.shields.io/github/v/release/Yg0rAndrade/carcara-code?style=flat-square&color=D99748&label=download" alt="Release"></a>
-  <a href="LICENSE"><img src="https://img.shields.io/badge/licença-MIT-D99748?style=flat-square" alt="MIT"></a>
-  <img src="https://img.shields.io/badge/plataforma-Windows-D99748?style=flat-square" alt="Windows">
-  <img src="https://img.shields.io/badge/feito%20com-Electron%20%2B%20React-D99748?style=flat-square" alt="Electron + React">
-  <a href="../../stargazers"><img src="https://img.shields.io/github/stars/Yg0rAndrade/carcara-code?style=flat-square&color=D99748" alt="Stars"></a>
-</p>
+O Loop Code é uma IDE desktop (Electron) da **Brabrix** para desenvolvimento com
+coding agents. A visão do produto: receber tarefas do **Brabrix Dev** (backlog,
+PRDs, especificações, critérios de aceite) e executá-las em **Coding Loops**
+controlados — planejar → implementar → build → testes → revisão → validação →
+commit/PR → atualizar a tarefa.
 
-<p align="center">
-  <img src="imgs/hero.png" alt="Carcará Code: chat com o Claude Code à esquerda e preview do projeto rodando à direita" width="100%">
-</p>
+## Estado do projeto
 
-<p align="center">
-  <a href="https://www.youtube.com/watch?v=TZSSrXYWrYU">
-    <img src="https://img.youtube.com/vi/TZSSrXYWrYU/maxresdefault.jpg" alt="Assista à demonstração do Carcará Code" width="70%">
-  </a>
-  <br>
-  <a href="https://www.youtube.com/watch?v=TZSSrXYWrYU"><strong>&#9654;&nbsp; Assista à demonstração no YouTube</strong></a>
-</p>
+**Loop Code is currently under active development.** O produto está em
+transição do fork original para a arquitetura de Coding Loops — os documentos
+em [`docs/`](docs/) descrevem o plano por fases.
 
----
+## Capacidades atuais
 
-## O que é
+O que já funciona hoje, herdado e evoluído do projeto original:
 
-Eu costumo tocar vários projetos ao mesmo tempo, e trabalhar com IA nisso virava um caos de janelas: uma instância do VS Code por projeto, um terminal em cada, o preview no navegador, o Git noutro canto.
+- **Projetos no rail** — um ícone por projeto, sessões de IA independentes por
+  projeto, projetos remotos via SSH.
+- **Agentes de IA por CLI** — Claude Code, Codex, OpenCode, Antigravity ou
+  comando customizado, escolhidos por projeto/sessão (terminal interativo ou
+  chat headless com o Claude Code).
+- **Contrato genérico de coding agents** (`electron/agents/`) — registry +
+  service + adapter do Claude Code para execuções programáticas.
+- **Coding Loops (experimental)** — motor local de workflows
+  (`electron/loop/`): planejar → aprovar (checkpoint humano) → implementar →
+  validar → repetir até passar ou atingir limites, com persistência,
+  cancelamento e retomada. Painel "Loops" no menu de ferramentas do projeto.
+  Templates: Feature Development e Bug Fix.
+- **Editor de código** (CodeMirror) com árvore de arquivos, busca e visualização
+  de mídia/planilhas/PDF.
+- **Terminal integrado** (xterm + node-pty) por sessão e terminal livre por
+  projeto.
+- **Preview automático** — detecta o script `dev`/`start`, sobe o servidor e
+  mostra o site embutido (inclui runtime PHP no Windows).
+- **Git** — status, diff, stage, commit, push/pull, branches.
+- **Checkpoints** — "voltar no tempo" sem sujar o Git do projeto (repositório-
+  sombra separado).
+- **Cliente MCP** e **cliente REST** (aba API) por projeto.
+- **i18n pt/en** e temas claro/escuro.
 
-O **Carcará Code** junta tudo num lugar só. Três painéis, zero firula:
+## Visão futura (roadmap)
 
-1. **Rail** — um ícone por projeto (varre a sua pasta raiz). Cada ícone tem a sua sessão de IA viva; dá pra ter o Claude trabalhando em três projetos em paralelo e voar entre eles num clique.
-2. **Chat** — conversa com o Claude Code naquele projeto (usa a **sua assinatura**, não a API: não precisa de API key e a conta não passa por ninguém).
-3. **Preview** — detecta o script `dev`/`start`, sobe o servidor e mostra o site embutido. Se já estiver rodando, não sobe de novo.
+- **Git por execução**: branch/worktree isolada por loop, diff e preparação de
+  commit (Fase 3).
+- **Integração Brabrix**: receber tarefas com contexto (PRD, spec, critérios),
+  publicar progresso e atualizar a tarefa ao final.
+- **Validação automática** de critérios de aceite.
+- **Múltiplos agentes** por workflow (implementador, revisor).
+- **Branch/worktree por execução** e criação de pull request.
 
-## Recursos
+Detalhes: [`docs/LOOP_CODE_ARCHITECTURE.md`](docs/LOOP_CODE_ARCHITECTURE.md) e
+[`docs/LOOP_CODE_MIGRATION_PLAN.md`](docs/LOOP_CODE_MIGRATION_PLAN.md).
 
-**Preview automático ao selecionar o projeto**
+## Desenvolvimento local
 
-Clicou no ícone, o preview sobe sozinho. Chat de um lado, site do outro, e a mudança aparece na hora.
-
-<img src="imgs/preview-site.png" alt="Preview do site rodando embutido, ao lado do chat" width="100%">
-
-**Editor de código com árvore de arquivos**
-
-Quando precisa pôr a mão no código, o editor (CodeMirror) e a árvore de arquivos estão ali, sem trocar de janela.
-
-<img src="imgs/code.png" alt="Editor de código com árvore de arquivos" width="100%">
-
-**Qualquer IA com CLI, por projeto**
-
-Cada projeto escolhe qual CLI usar: Claude Code, Codex, OpenCode, Antigravity ou um comando personalizado.
-
-<img src="imgs/ai-per-project.png" alt="Tela de configuração: escolher a CLI de IA por projeto" width="100%">
-
-**E ainda:** chamadas de API (aba REST), conexão MCP, subir pro GitHub e checkpoints para "voltar no tempo" — sem sujar o Git do seu projeto (o histórico vive num repositório-sombra separado).
-
-## Baixar
-
-Pegue a versão mais recente na página de **[Releases](../../releases)**.
-
-**Windows** — baixe o `CarcaraCode-Setup-*.exe`, execute e pronto.
-
-> Na primeira execução o Windows pode mostrar um aviso do SmartScreen ("O Windows protegeu seu PC"), porque o instalador ainda não é assinado. Clique em **Mais informações → Executar assim mesmo**. É seguro — o código é aberto, dá pra auditar tudo aqui.
-
-**Linux** — baixe o `CarcaraCode-*.AppImage`, dê permissão de execução e abra:
+Gerenciador de pacotes: **npm** (lockfile `package-lock.json`).
 
 ```bash
-chmod +x CarcaraCode-*.AppImage
-./CarcaraCode-*.AppImage
+npm install          # dependências
+npm run dev          # Vite dev server (renderer, porta 5234)
+npm start            # Electron (carrega dist/ — rode npm run build antes)
+npm run build        # build do renderer para dist/
+npm run lint         # eslint (não há script de typecheck; o projeto é JS puro)
+npm test             # vitest (unidade)
+npm run test:i18n    # paridade de traduções pt/en
+npm run test:platform
+npm run pack:exe     # instalador Windows (NSIS)
+npm run pack:appimage# AppImage Linux
+npm run pack:dmg     # DMG macOS
 ```
 
-> É um arquivo único e portátil — não precisa instalar. No gerenciador de arquivos, dá também pra marcar "Permitir execução" nas propriedades e abrir com duplo-clique.
+> Dica: se abrir o Electron de dentro de um terminal do Claude Code, limpe a
+> variável `ELECTRON_RUN_AS_NODE` antes de `npm start`.
 
-## Como rodar (a partir do código)
+## Arquitetura (visão resumida)
 
-```bash
-npm install
-npm start
+```text
+Electron Main   main.js + electron/*.cjs — janela, IPC, processos, git,
+                preview, MCP, checkpoints, SSH remoto
+Preload         preload.js — única ponte renderer↔main (window.api)
+Renderer        src/ — React + Vite + Tailwind (rail, chat, editor, preview…)
+Agents          electron/agents/ — contrato genérico (registry/service/adapter);
+                electron/ai-cli.cjs + chat-cli.cjs — CLIs por projeto e chat headless
+Workspace       projetos, fs, terminal (node-pty/ssh2), preview, git (simple-git)
+Persistence     userData/config.json (app) + <projeto>/.loopcode/ (por projeto,
+                com fallback de leitura do legado .carcara/)
 ```
 
-Na primeira vez, clique no **+** do rail pra escolher a pasta onde ficam seus projetos (padrão: `~/Documents/github`). Cada subpasta vira um ícone.
+Documentação técnica: [`docs/`](docs/) — em especial
+[`docs/AGENT_ADAPTER_ARCHITECTURE.md`](docs/AGENT_ADAPTER_ARCHITECTURE.md) e
+[`docs/LOOP_CODE_BRANDING_MIGRATION.md`](docs/LOOP_CODE_BRANDING_MIGRATION.md).
 
-## Requisitos
+## Open source attribution
 
-- **Node.js** instalado.
-- **Claude Code** instalado e logado (`claude` no terminal funcionando) — o chat usa a mesma autenticação.
+Loop Code is based on **[Carcará Code](https://github.com/Yg0rAndrade/carcara-code)**,
+created by **Ygor Andrade**, and is distributed under the terms described in the
+repository [LICENSE](LICENSE) file (MIT License, © 2026 Ygor Andrade). The
+original copyright notice and permission notice are preserved as required by
+the license.
 
-## Notas (MVP)
-
-- O chat roda em modo `bypassPermissions` pra ter o fluxo "Lovable" (sem pedir confirmação a cada passo).
-- O preview detecta a porta lendo a saída do dev server (`http://localhost:PORT`).
-- Estado por projeto (chat/preview) vive em memória enquanto o app está aberto.
-- Se for abrir de dentro de um terminal do Claude Code, limpe `ELECTRON_RUN_AS_NODE` antes (`$env:ELECTRON_RUN_AS_NODE=$null; npm start`) — essa variável faz o Electron rodar como Node puro. Num terminal normal não precisa.
-
-## Como contribuir
-
-Toda ajuda é bem-vinda — bug, ideia, tradução, ou código.
-
-1. Abra uma **[issue](../../issues)** descrevendo o bug ou a ideia (ou pegue uma que já exista).
-2. Faça um **fork**, crie uma branch (`git checkout -b minha-melhoria`).
-3. Rode local com `npm install && npm start` pra testar.
-4. Lembre: edições em `src/` só aparecem depois de `npm run build` (o app carrega de `dist/`).
-5. Abra um **pull request** explicando o que mudou e por quê.
-
-Não precisa ser perfeito — PRs pequenos e focados são os mais fáceis de revisar e aceitar.
-
-## Stack
-
-Electron + React + Vite, CodeMirror (editor), xterm + node-pty (terminal), Tailwind. O chat conversa com o **Claude Code** que você já tem instalado.
+O Loop Code é derivado do **Carcará Code**, criado por Ygor Andrade e
+distribuído sob licença MIT. O arquivo [`LICENSE`](LICENSE), o copyright e os
+créditos originais estão preservados — inclusive na tela **Sobre** do app.
 
 ## Licença
 
-[MIT](LICENSE) © Ygor Andrade — use, modifique e distribua à vontade.
+[MIT](LICENSE) — veja o arquivo `LICENSE` na raiz do repositório.

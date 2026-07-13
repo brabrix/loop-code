@@ -25,6 +25,7 @@ import { ChevronDownIcon } from './ui/chevron-down.jsx';
 import { ZapIcon } from './ui/zap.jsx';
 import { PlugZapIcon } from './ui/plug-zap.jsx';
 import { PenToolIcon } from './ui/pen-tool.jsx';
+import { RefreshCCWIcon } from './ui/refresh-ccw.jsx';
 import { ArrowLeftIcon } from './ui/arrow-left.jsx';
 import { ArrowRightIcon } from './ui/arrow-right.jsx';
 import { RotateCWIcon } from './ui/rotate-cw.jsx';
@@ -51,7 +52,7 @@ import { toast } from '@/lib/toast';
 // mas no DOM da página eles vêm certos (button 3 = voltar, 4 = avançar) — igual a
 // qualquer site de teste de mouse. Injetado a cada navegação (dom-ready).
 const NAV_INJECT = `(function(){
-  if (window.__carcaraNav) return; window.__carcaraNav = true;
+  if (window.__loopcodeNav) return; window.__loopcodeNav = true;
   function h(e){
     if (e.button === 3 || e.button === 4){
       e.preventDefault();
@@ -77,6 +78,7 @@ const CheckpointsPanel = lazy(() =>
   import('./CheckpointsPanel.jsx').then((m) => ({ default: m.CheckpointsPanel })),
 );
 const TodosPanel = lazy(() => import('./TodosPanel.jsx').then((m) => ({ default: m.TodosPanel })));
+const LoopPanel = lazy(() => import('./LoopPanel.jsx').then((m) => ({ default: m.LoopPanel })));
 // Anotador do print (Fabric.js): code-split — só carrega quando há uma captura pra marcar.
 const AnnotatorModal = lazy(() => import('./AnnotatorModal.jsx'));
 
@@ -107,6 +109,7 @@ function MoreTools({ view, onPick }) {
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
   const TOOLS = [
+    { value: 'loops', label: t('preview.loops'), Icon: RefreshCCWIcon },
     { value: 'history', label: t('preview.history'), Icon: ClockIcon },
     { value: 'api', label: t('preview.api'), Icon: ZapIcon },
     { value: 'mcp', label: t('preview.mcp'), Icon: PlugZapIcon },
@@ -1632,6 +1635,7 @@ export function PreviewPanel({
   const inBoard = !remote && view === 'board';
   const inTodos = !remote && view === 'todos';
   const inHistory = !remote && view === 'history';
+  const inLoops = !remote && view === 'loops';
 
   return (
     <>
@@ -1948,6 +1952,11 @@ export function PreviewPanel({
           {inTodos && (
             <LazyPanel label="Tarefas">
               <TodosPanel active={active} chatSession={chatSession} />
+            </LazyPanel>
+          )}
+          {inLoops && (
+            <LazyPanel label="Coding Loops">
+              <LoopPanel active={active} />
             </LazyPanel>
           )}
         </div>

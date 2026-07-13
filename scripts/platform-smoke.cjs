@@ -43,9 +43,9 @@ assert(isLinux === (process.platform === 'linux'), 'isLinux');
 
 // macMenuTemplate: forma mínima esperada
 const { macMenuTemplate } = require('../electron/platform.cjs');
-const tpl = macMenuTemplate('Carcará Code');
+const tpl = macMenuTemplate('Loop Code');
 assert(Array.isArray(tpl) && tpl.length >= 2, 'template é array com >=2 menus');
-assert(tpl[0].label === 'Carcará Code', 'primeiro menu = nome do app');
+assert(tpl[0].label === 'Loop Code', 'primeiro menu = nome do app');
 const roles = JSON.stringify(tpl);
 assert(roles.includes('"quit"'), 'tem role quit (Cmd+Q)');
 assert(roles.includes('"copy"') && roles.includes('"paste"'), 'tem copy/paste no Edit');

@@ -8,7 +8,7 @@ let filePath;
 beforeEach(() => {
   filePath = path.join(
     os.tmpdir(),
-    `carcara-kh-${process.pid}-${Math.round(performance.now())}.json`,
+    `loopcode-kh-${process.pid}-${Math.round(performance.now())}.json`,
   );
   try {
     fs.unlinkSync(filePath);
@@ -34,7 +34,7 @@ describe('makeKnownHosts', () => {
   it('trust retorna false quando a escrita falha', () => {
     const dirAsFile = path.join(
       os.tmpdir(),
-      `carcara-kh-dir-${process.pid}-${Math.round(performance.now())}`,
+      `loopcode-kh-dir-${process.pid}-${Math.round(performance.now())}`,
     );
     fs.mkdirSync(dirAsFile, { recursive: true });
     const kh = makeKnownHosts({ filePath: dirAsFile });

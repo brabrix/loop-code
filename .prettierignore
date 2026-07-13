@@ -2,6 +2,7 @@ dist/
 release/
 node_modules/
 package-lock.json
+.loopcode/
 .carcara/
 # Worktrees de outras branches (têm seu próprio git) e artefatos que não são fonte do app.
 .claude/

@@ -3,7 +3,7 @@ import { Check, Download, RefreshCw, GitBranch, Hexagon, Loader2, FileCode } fro
 import { Button } from './ui/button.jsx';
 import { useT } from '@/lib/i18n';
 
-// Ferramentas externas que o Carcará usa. O app abre sem elas (o Electron traz o próprio
+// Ferramentas externas que o Loop Code usa. O app abre sem elas (o Electron traz o próprio
 // runtime) e a gente só guia a instalação — sem instalar nada escondido, sem pedir admin.
 // Nota: o CLI de IA (Claude Code, Codex, OpenCode, Antigravity…) NÃO entra aqui — cada um
 // instala o seu, e nem todo mundo usa o Claude. Aqui ficam só as dependências comuns a todos.
@@ -34,7 +34,7 @@ export const DEPENDENCIES = [
     url: 'https://git-scm.com/download/win',
   },
   {
-    // Só fora do Windows: no Windows o Carcará baixa o PHP sob demanda pro Preview.
+    // Só fora do Windows: no Windows o Loop Code baixa o PHP sob demanda pro Preview.
     // No Linux/macOS não há build portátil oficial, então usamos o php do sistema.
     key: 'php',
     name: 'PHP',

@@ -32,7 +32,7 @@ createRoot(document.getElementById('root')).render(
     <LanguageProvider>
       <LayoutProvider>
         <ChatModeProvider>
-          <ErrorBoundary label="Carcará Code">
+          <ErrorBoundary label="Loop Code">
             <App />
           </ErrorBoundary>
         </ChatModeProvider>

@@ -39,7 +39,7 @@ jobs:
       - name: Publicar o .exe como artefato
         uses: actions/upload-artifact@v4
         with:
-          name: CarcaraCode-Setup
+          name: LoopCode-Setup
           path: release/*.exe
           retention-days: 30
           if-no-files-found: error

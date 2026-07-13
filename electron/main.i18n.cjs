@@ -14,10 +14,12 @@ module.exports = {
     ctx_open_new_tab: 'Abrir link em nova aba',
     ctx_inspect: 'Inspecionar elemento',
     dialog_choose_folders: 'Escolha a(s) pasta(s) de projeto',
-    notify_title: 'Carcará Code',
+    notify_title: 'Loop Code',
     notify_asking: 'Claude precisa de você em {name}',
     notify_done: 'Claude terminou em {name}',
     update_notify_body: 'Versão {version} disponível — abra para atualizar',
+    agent_workspace_denied:
+      'Workspace não autorizado. Adicione a pasta como projeto antes de executar o agente.',
   },
   en: {
     ctx_back: 'Go back',
@@ -31,9 +33,11 @@ module.exports = {
     ctx_open_new_tab: 'Open link in new tab',
     ctx_inspect: 'Inspect element',
     dialog_choose_folders: 'Choose project folder(s)',
-    notify_title: 'Carcará Code',
+    notify_title: 'Loop Code',
     notify_asking: 'Claude needs you in {name}',
     notify_done: 'Claude finished in {name}',
     update_notify_body: 'Version {version} available — open to update',
+    agent_workspace_denied:
+      'Workspace not authorized. Add the folder as a project before running the agent.',
   },
 };

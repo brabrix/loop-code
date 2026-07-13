@@ -14,7 +14,9 @@ mouse-debug.log
 .env.*
 !.env.example
 
-# Carcará: config local de projeto (servidores MCP salvos, checkpoints etc.)
+# Loop Code: config local de projeto (prompts, requests, servidores MCP salvos)
+.loopcode/
+# Legado do Carcará Code (o app ainda lê daqui como fallback)
 .carcara/
 
 # Ferramentas locais do Claude Code (skills, settings) — não fazem parte do app

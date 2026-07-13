@@ -1,7 +1,7 @@
 {
-  "name": "carcara-code",
+  "name": "loop-code",
   "version": "0.1.8",
-  "description": "IDE minimalista para o Claude Code — cara de Lovable",
+  "description": "IDE orientada a workflows de codificação com agentes de inteligência artificial.",
   "main": "main.js",
   "scripts": {
     "dev": "vite",
@@ -33,12 +33,12 @@
     ]
   },
   "build": {
-    "appId": "com.carcara.code",
-    "productName": "Carcará Code",
+    "appId": "com.brabrix.loopcode",
+    "productName": "Loop Code",
     "publish": {
       "provider": "github",
-      "owner": "Yg0rAndrade",
-      "repo": "carcara-code"
+      "owner": "brabrix",
+      "repo": "loop-code"
     },
     "directories": {
       "output": "release"
@@ -64,15 +64,15 @@
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "Carcará Code",
-      "uninstallDisplayName": "Carcará Code ${version}",
-      "artifactName": "CarcaraCode-Setup-${version}.exe"
+      "shortcutName": "Loop Code",
+      "uninstallDisplayName": "Loop Code ${version}",
+      "artifactName": "LoopCode-Setup-${version}.exe"
     },
     "linux": {
       "target": "AppImage",
       "icon": "build/icon.png",
       "category": "Development",
-      "artifactName": "CarcaraCode-${version}.AppImage"
+      "artifactName": "LoopCode-${version}.AppImage"
     },
     "mac": {
       "target": "dmg",
@@ -80,10 +80,10 @@
       "category": "public.app-category.developer-tools",
       "hardenedRuntime": false,
       "identity": null,
-      "artifactName": "CarcaraCode-${version}-${arch}.dmg"
+      "artifactName": "LoopCode-${version}-${arch}.dmg"
     },
     "dmg": {
-      "title": "Carcará Code ${version}"
+      "title": "Loop Code ${version}"
     }
   },
   "devDependencies": {

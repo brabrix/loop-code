@@ -50,7 +50,7 @@ if (status) {
 if (!status && !naoEnviados) process.exit(0); // nada a fazer
 
 const msg = [
-  '[BACKUP DIÁRIO] Ainda não há commit de hoje neste repositório (carcara-code).',
+  '[BACKUP DIÁRIO] Ainda não há commit de hoje neste repositório (loop-code).',
   estado,
   'Antes de prosseguir com o pedido do usuário, faça o backup do dia:',
   '1. Se houver alterações, faça `git add -A` e um commit com mensagem descritiva do dia.',

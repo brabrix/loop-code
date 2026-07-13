@@ -20,7 +20,7 @@ let filePath;
 beforeEach(() => {
   filePath = path.join(
     os.tmpdir(),
-    `carcara-secrets-${process.pid}-${Math.round(performance.now())}.json`,
+    `loopcode-secrets-${process.pid}-${Math.round(performance.now())}.json`,
   );
   try {
     fs.unlinkSync(filePath);
@@ -49,7 +49,7 @@ describe('makeSecretStore', () => {
   it('save retorna false quando a escrita falha', () => {
     const dirAsFile = path.join(
       os.tmpdir(),
-      `carcara-secrets-dir-${process.pid}-${Math.round(performance.now())}`,
+      `loopcode-secrets-dir-${process.pid}-${Math.round(performance.now())}`,
     );
     fs.mkdirSync(dirAsFile, { recursive: true }); // filePath = diretório → writeFileSync lança
     const s = makeSecretStore({ crypto: fakeCrypto, filePath: dirAsFile });

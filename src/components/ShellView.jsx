@@ -129,7 +129,7 @@ export function ShellView({ activeProject, visible, onOpenUrl }) {
       const fit = new FitAddon();
       term.loadAddon(fit);
       // Links clicáveis no terminal (addon oficial do xterm). Ctrl/Cmd+clique
-      // abre a URL no preview do Carcará em vez do navegador externo; clique
+      // abre a URL no preview do Loop Code em vez do navegador externo; clique
       // simples é ignorado pra não atrapalhar a seleção de texto.
       term.loadAddon(
         new WebLinksAddon((event, uri) => {

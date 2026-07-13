@@ -1,5 +1,5 @@
 // A partir do logo.svg original (traçado, com viewBox largo e sobra de branco),
-// gera dois artefatos com o carcará CENTRALIZADO num quadrado:
+// gera dois artefatos com a marca CENTRALIZADA num quadrado:
 //   - src/assets/logo.svg  -> usado na interface (bolinha da barra lateral)
 //   - build/icon.png       -> ícone da janela/taskbar (256px, fundo transparente)
 //

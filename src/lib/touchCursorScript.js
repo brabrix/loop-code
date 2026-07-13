@@ -9,13 +9,13 @@
 // Injetado quando o viewport é 'mobile' e re-injetado a cada navegação (dom-ready).
 
 export const INJECT = `(() => {
-  if (window.__carcaraTouch) return;
+  if (window.__loopcodeTouch) return;
   var ACCENT = '#f2792b';
 
   // Bolinha translúcida de "dedo": segue o ponteiro, centrada nele. pointer-events:none pra
   // deixar o clique real passar pro site por baixo; z-index alto igual ao box do grab.
   var dot = document.createElement('div');
-  dot.className = '__carcara-touch-dot';
+  dot.className = '__loopcode-touch-dot';
   dot.style.cssText = 'position:fixed;left:0;top:0;width:22px;height:22px;margin:0;'
     + 'border-radius:50%;pointer-events:none;z-index:2147483646;display:none;'
     + 'background:' + ACCENT + '40;border:2px solid ' + ACCENT + 'cc;'
@@ -29,7 +29,7 @@ export const INJECT = `(() => {
   // da bolinha. Uma folha de estilo com '*' + !important cala todos eles — no
   // celular real não há cursor pra mostrar.
   var style = document.createElement('style');
-  style.className = '__carcara-touch-style';
+  style.className = '__loopcode-touch-style';
   style.textContent = '*, *::before, *::after { cursor: none !important; }';
   document.documentElement.appendChild(style);
 
@@ -53,7 +53,7 @@ export const INJECT = `(() => {
 
   function tap(e){
     var r = document.createElement('div');
-    r.className = '__carcara-touch-ripple';
+    r.className = '__loopcode-touch-ripple';
     r.style.cssText = 'position:fixed;left:0;top:0;width:26px;height:26px;margin:0;'
       + 'border-radius:50%;pointer-events:none;z-index:2147483645;'
       + 'background:' + ACCENT + '4d;border:2px solid ' + ACCENT + 'cc;'
@@ -91,7 +91,7 @@ export const INJECT = `(() => {
     for (var i = 0; i < ripples.length; i++) { try { ripples[i].remove(); } catch (e) {} }
     ripples = [];
     try { dot.remove(); } catch (e) {}
-    window.__carcaraTouch = null;
+    window.__loopcodeTouch = null;
   }
 
   // pointermove além de mousemove: com a emulação de toque ligada (device mode), o
@@ -104,7 +104,7 @@ export const INJECT = `(() => {
   // página inteira) — diferente de documentElement, que dispararia a cada saída
   // de um elemento filho.
   document.addEventListener('mouseleave', leave, { passive: true });
-  window.__carcaraTouch = { teardown: teardown };
+  window.__loopcodeTouch = { teardown: teardown };
 })();`;
 
-export const CLEANUP = `(() => { if (window.__carcaraTouch && window.__carcaraTouch.teardown) window.__carcaraTouch.teardown(); })();`;
+export const CLEANUP = `(() => { if (window.__loopcodeTouch && window.__loopcodeTouch.teardown) window.__loopcodeTouch.teardown(); })();`;

@@ -1,4 +1,4 @@
-// Empty state padrão do app: o carcará cinza + um texto. Centralizado no espaço
+// Empty state padrão do app: a marca (o carcará, herdada do fork) em cinza + um texto. Centralizado no espaço
 // disponível. Use `size="lg"` pra tela de boas-vindas (nenhum projeto aberto),
 // onde o carcará aparece bem grande.
 import logoLight from '@/assets/logo-light.svg';

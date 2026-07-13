@@ -250,7 +250,7 @@ export function MCPPanel({ active }) {
       ? { ...base, headers: { Authorization: 'Bearer ' + bearer.trim() } }
       : { ...base, oauth: true };
   };
-  // Config sem segredos, p/ persistir em .carcara/mcp-servers.json (o token nunca vai pro disco).
+  // Config sem segredos, p/ persistir em .loopcode/mcp-servers.json (o token nunca vai pro disco).
   const buildSavedConfig = () => {
     const c = buildConfig();
     if (c.headers) delete c.headers;

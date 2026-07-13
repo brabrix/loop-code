@@ -64,7 +64,7 @@ async function mcpConnect(
     capabilities.sampling = {};
     capabilities.elicitation = {};
   }
-  const client = new Client({ name: 'carcara-code', version: '0.1.0' }, { capabilities });
+  const client = new Client({ name: 'loop-code', version: '0.1.0' }, { capabilities });
 
   // Estado de roots (mutável; atualizável por mcpSetRoots).
   const state = { roots: Array.isArray(hooks.roots) ? hooks.roots : [] };

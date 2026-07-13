@@ -1,88 +1,137 @@
-# Carcará Code
+# Loop Code
 
-IDE minimalista em Electron para o Claude Code (estilo Lovable). Um ícone por projeto,
-com chat e preview lado a lado. Usa a assinatura do Claude, nunca a API.
+Loop Code é uma **IDE orientada a workflows de desenvolvimento com coding
+agents** (Electron + React), conectada ao **Brabrix Dev**. Fork do Carcará Code
+(MIT © Ygor Andrade — manter `LICENSE` e créditos intactos, inclusive o cartão
+de atribuição na tela Sobre).
 
-## Projetos relacionados
+## Visão e relação com o Brabrix
 
-- **Site de marketing** (repositório separado): `../carcara-code-site`
-  Landing em **Astro** publicada em https://carcaracode.net. Mantê-lo em sincronia
-  com o app: se o pitch, a versão ou os recursos mudarem aqui, refletir lá também.
-  Build: `npm run build` (na pasta do site). Deploy via Cloudflare (`wrangler.jsonc`).
+- O **Brabrix Dev** cuida de projetos, backlog, sprints, tarefas, PRDs, specs,
+  critérios de aceite e acompanhamento.
+- O **Loop Code** abre o projeto local, recebe tarefas do Brabrix, monta
+  contexto, executa agentes de código (Claude Code, Codex, OpenCode, custom),
+  roda **Coding Loops** (implementar → build → testar → revisar → validar
+  critérios → commit/PR) e publica o progresso de volta no Brabrix.
+- Rota de evolução e estado atual: `docs/LOOP_CODE_TECHNICAL_ASSESSMENT.md`,
+  `docs/LOOP_CODE_ARCHITECTURE.md`, `docs/LOOP_CODE_MIGRATION_PLAN.md` e os
+  contratos em `docs/contracts/loop-code-contracts.ts`.
 
-- **Repo público do app:** https://github.com/Yg0rAndrade/carcara-code
+## Comandos do projeto (npm — lockfile é package-lock.json)
 
-## Notas de desenvolvimento
+```bash
+npm install          # dependências
+npm run dev          # Vite dev server (porta 5234)
+npm start            # Electron (carrega dist/ — rode npm run build antes)
+npm run build        # build do renderer para dist/
+npm run lint         # eslint
+npm test             # vitest (unidade)
+npm run test:i18n    # paridade pt/en (obrigatório se mexer em texto)
+npm run test:platform
+```
 
-- Edições em `src/` só aparecem depois de `npm run build` (o app carrega de `dist/`).
-- O app pode estar rodando com uma sessão viva do Claude Code — não force relaunch sem confirmar.
-- Para abrir o Electron de dentro de um terminal do Claude, limpe `ELECTRON_RUN_AS_NODE`.
-- Ao lançar uma nova versão, atualizar `CHANGELOG.md` (padrão Keep a Changelog) com o
-  diff do que mudou da versão anterior para a atual, antes do commit `chore(release): x.y.z`.
+- Edições em `src/` **só aparecem no app após `npm run build`** (o Electron
+  carrega de `dist/`).
+- Se abrir o Electron de dentro de um terminal do Claude Code, limpe
+  `ELECTRON_RUN_AS_NODE` antes, senão ele roda como Node puro.
 
-## DIFERENÇAS DE PLATAFORMA (Win/Mac/Linux)
+## Estrutura principal
 
-Os módulos do processo main moram em `electron/` (ex.: `electron/platform.cjs`,
-`electron/php-runtime.cjs`, `electron/remote/`); só `main.js` e `preload.js` ficam na raiz.
+- `main.js` — processo main (monólito; novos domínios vão para `electron/`).
+- `preload.js` — única ponte renderer↔main (`window.api`).
+- `electron/*.cjs` — módulos do main. **Padrão obrigatório:** lógica pura e
+  testável no `.cjs` (sem Electron/fs), efeitos colaterais no `main.js`.
+- `electron/agents/` — camada genérica de coding agents (ver abaixo).
+- `electron/remote/` — SSH (ssh2, secretStore com safeStorage, TOFU).
+- `src/` — renderer React (JSX, alias `@/`, Tailwind + tokens de tema).
+- `scripts/*.cjs` — smokes standalone.
 
-Nunca espalhe `process.platform` pelo código. Diferença de SO vai em `electron/platform.cjs`
-(módulo canônico, estilo `platform.ts` do VS Code):
+## Princípios da camada de agentes (`electron/agents/`)
 
-- É um **valor** (nome de shell, extensão de binário, comando de "abrir", URL de asset)?
-  → vira chave na tabela `TABLE` de `electron/platform.cjs`. Adicionar suporte a um SO = preencher
-  a coluna dele.
-- É **comportamento** (resolver PATH, montar menu, escolher login shell)? → vira uma
-  função em `electron/platform.cjs` que aceita `platform` como parâmetro (default `process.platform`),
-  para ser testável em qualquer SO via `scripts/platform-smoke.cjs`.
-- Comportamento que precisa de `fs`/`child_process` (ex.: download/extração por SO) mora
-  no módulo que já tem Node (ex.: `electron/php-runtime.cjs`), ramificando por `process.platform`,
-  mas com as partes de decisão (asset, nome de binário) como funções puras testáveis.
+- Integração com agentes **sempre via adapters** do contrato
+  `CodingAgentAdapter` (descriptor + checkAvailability + execute + cancel);
+  o domínio não depende de nenhum agente específico.
+- **Claude Code é a primeira implementação** (`claude-code-adapter.cjs`), que
+  reusa a lógica pura de `chat-cli.cjs` — não reimplemente a CLI.
+- Novo agente = novo adapter registrado no `CodingAgentRegistry`
+  (`electron/agents/index.cjs`). Nunca registre agente sem implementação real.
+- Toda operação passa pelo `CodingAgentService` (rastreia execuções, impede id
+  duplicado e cancelamento cruzado); os handlers IPC (`agents:*`) só validam e
+  delegam.
+- O **renderer nunca executa processos**: processos vivem no Electron Main,
+  com deps injetáveis para os testes (nada de CLI real em teste unitário).
+- IPC de agentes valida input no main (`validateExecutionInput` +
+  `isAuthorizedWorkspace` — só workspaces da lista de projetos).
+- Canais `chat:*` (chat interativo) e `term:*` (terminal) continuam existindo;
+  `agents:*` é o caminho programático (1 prompt → 1 execução → 1 resultado)
+  consumido pelo motor de Coding Loops.
 
-Regra de ouro: se você escreveu `process.platform === '...'` fora de `electron/platform.cjs`,
-provavelmente há um lugar melhor. O caminho Windows nunca deve regredir ao adicionar Mac/Linux.
+## Princípios do motor de Coding Loops (`electron/loop/`)
 
-## AUTO-APRENDIZADO
+- **O LoopRunner controla o workflow** — agentes executam UMA etapa e devolvem
+  resultado; transições são resolvidas pelo `TransitionResolver` com base na
+  definição, nunca pela vontade do agente.
+- Executores de etapa são registrados por tipo no `StepExecutorRegistry`
+  (novo tipo de etapa = novo executor; nada de switch gigante no runner).
+- Comandos usam `executable` + `arguments` em array (sem shell fora do
+  Windows, sem concatenação); cwd sempre no workspace autorizado.
+- O renderer (LoopPanel) não executa processos: só pede ações via IPC
+  `loop:*` validado e exibe estado/eventos (`loop:event`).
+- Checkpoints humanos são PERSISTIDOS (nada de Promise aberta esperando a
+  UI); aprovação/rejeição são operações separadas e sobrevivem a reinício.
+- Todo loop tem limites obrigatórios (`maxIterations` no mínimo) e é
+  cancelável (`AbortController` → agente/comando morrem de verdade).
+- Estados terminais (`completed`, `blocked`, `failed`, `cancelled`,
+  `limit_reached`) são imutáveis — continuar exige nova execução.
+- Runs interrompidos por fechamento do app NUNCA assumem sucesso: recovery
+  marca como interrompido e o usuário retoma conscientemente.
+- Nenhuma integração falsa com Brabrix: a integração real é fase futura e não
+  deve ser simulada na UI.
+- Docs: `docs/CODING_LOOP_ENGINE.md`, `CODING_LOOP_DEFINITION.md`,
+  `CODING_LOOP_EXECUTION.md`, `CODING_LOOP_SECURITY.md`.
 
-Ao final de toda sessão, capture todos os desafios e pontos de fricção que você encontrou que podem ocorrer novamente no futuro.
+## Convenções
 
-Se é algo que pode ser corrigido, corrija.
+- Diferenças de SO **sempre** via `electron/platform.cjs` — nunca espalhar
+  `process.platform` (detalhes no `AGENTS.md`).
+- i18n: nenhum texto de UI hardcoded no JSX; toda string em
+  `src/lib/locales/{pt,en}.json` (renderer) ou `electron/main.i18n.cjs` (main),
+  sempre nos **dois** idiomas (detalhes no `AGENTS.md`).
+- Módulos novos do main seguem o padrão core puro + teste vitest ao lado.
+- Novos canais IPC: namespace claro (`loop:*`, `agents:*`, `brabrix:*`) e
+  validação de entrada no main (paths dentro do projeto, ids conhecidos).
 
-Se não é algo que pode ser corrigido, coloque essa informação no arquivo DESAFIOS.md.
+## Segurança
 
-Se o aprendizado se refere a uma Skill, modifique a skill ao invés de gravar o desafio.
+- Manter `contextIsolation: true` e `nodeIntegration: false`; nada de expor
+  Node cru ao renderer.
+- Segredos (tokens Brabrix, senhas SSH) **somente** via `safeStorage`
+  (padrão `electron/remote/secretStore.cjs`) — nunca em `config.json`, logs,
+  eventos ou neste arquivo.
+- Execução autônoma de agentes exige limites (iterações/tempo/custo) e nunca
+  herda `bypassPermissions` como default escondido.
 
-Leia o DESAFIOS.md desse projeto ao iniciar uma nova sessão.
+## Regras de Git
 
-## GESTÃO DE CONTEXTO
+- **Nunca execute `git push`** (nem o "backup diário" descrito no `AGENTS.md`
+  herdado do projeto original — essa regra está **revogada** neste fork).
+- Não faça commit sem o usuário pedir; não altere histórico; não use
+  `git reset --hard`.
+- Este repositório é um **submodule** de `micro-saas-core` — alterações ficam
+  no Git daqui; o repo pai só atualiza o ponteiro (feito pelo usuário).
+- Mudanças focadas e pequenas; outras sessões podem estar trabalhando em
+  paralelo (worktrees).
 
-Ao iniciar tarefas multi-step, documente tudo em arquivos .md, para que eu possa ir compactando e iniciando novas sessões sem perder contexto.
+## Como trabalhar neste fork
 
-Sempre que o contexto da conversa não for mais necessário, me sugira compactar ou iniciar nova sessão, para economizar tokens.
-
-Me diga se o próximo passo precisa ser Opus, ou se pode ser Sonnet (plano claro) ou Haiku (puramente mecânicas).
-
-## DECISÕES MUITO TÉCNICAS
-
-Toda vez que eu precisar tomar uma decisão técnica (escolha de stack, bibliotecas, padrões de código, segurança, manutenibilidade), me ofereça os prós e contras de cada opção.
-
-E a sua recomendação baseada em critérios técnicos, de DRY e código limpo.
-
-## TRABALHO DE PEÃO
-
-Nunca me peça para rodar comandos no terminal ou manipular arquivos diretamente, se é algo que você pode fazer.
-
-## AÇÕES PENDENTES
-
-Tudo que depende da minha decisão vai no final, num bloco separado:
-
-═══ ⚠️ PENDENTE: ═══
-
-<confirmação / decisão / escolha, com sua recomendação em uma linha>
-
-═══
-
-## FINALIZAR SESSÃO
-
-Ao finalizar uma sessão, quando não tiver mais nada pendente e mais nada a ser feito, coloque ao final da resposta:
-
-═══ ✅ SESSÃO FINALIZADA ═══
+- **Mudanças incrementais e aditivas** — preserve o comportamento existente
+  (chat, preview, git, MCP, checkpoints); o Coding Loop é camada nova, não
+  substituição.
+- Antes de fechar qualquer tarefa: `npm run lint && npm test && npm run build`
+  (e `npm run test:i18n` se tocou em texto). Não esconda erro ignorando
+  validação.
+- Sem atualização em massa de dependências; sem troca de framework.
+- Identidade: o rebranding para Loop Code está aplicado; identificadores
+  legados mantidos de propósito (ex.: chave `carcara-board:` do tldraw,
+  fallback de leitura de `.carcara/`) estão documentados em
+  `docs/LOOP_CODE_BRANDING_MIGRATION.md` — não os "conserte" sem ler o doc.

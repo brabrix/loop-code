@@ -203,7 +203,7 @@ function PromptMd({ text }) {
 
 // Biblioteca de prompts reutilizáveis (por projeto). O botão fica na barra de abas do
 // chat; clicar num prompt INJETA o texto no terminal da sessão ativa (sem Enter), pra
-// você revisar e enviar. Salva/edita/remove na lista persistida em .carcara/prompts.json.
+// você revisar e enviar. Salva/edita/remove na lista persistida em .loopcode/prompts.json.
 function PromptMenu({ projectPath, sessionId, onInsert }) {
   const t = useT();
   const [open, setOpen] = useState(false);

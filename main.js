@@ -54,12 +54,35 @@ let knownHosts = null;
 let connections = null;
 let remoteFs = null;
 
-const APP_NAME = 'Carcará Code';
+const APP_NAME = 'Loop Code';
+// Nome do app original (fork do Carcará Code): usado só pra migrar dados locais.
+const LEGACY_APP_NAME = 'Carcará Code';
 const APP_ICON = path.join(__dirname, 'build', 'icon.png');
 
 // Nome e identidade no Windows (agrupa o ícone certo na taskbar).
 app.setName(APP_NAME);
-if (process.platform === 'win32') app.setAppUserModelId('com.carcara.code');
+if (process.platform === 'win32') app.setAppUserModelId('com.brabrix.loopcode');
+
+// Migração única de userData: mudar o nome do app muda a pasta (ex.:
+// "…/Application Support/Loop Code"). Se o config novo ainda não existe e há
+// dados do Carcará Code, copia config.json + checkpoints (não move: o app
+// antigo continua funcionando). Segredos SSH NÃO migram — o safeStorage cifra
+// por app, então o ciphertext antigo não abriria aqui; o usuário reinsere.
+function migrateLegacyUserData() {
+  try {
+    const cur = app.getPath('userData');
+    if (fs.existsSync(path.join(cur, 'config.json'))) return;
+    const legacy = path.join(path.dirname(cur), LEGACY_APP_NAME);
+    if (!fs.existsSync(path.join(legacy, 'config.json'))) return;
+    fs.mkdirSync(cur, { recursive: true });
+    fs.copyFileSync(path.join(legacy, 'config.json'), path.join(cur, 'config.json'));
+    const legacyCk = path.join(legacy, 'checkpoints');
+    const curCk = path.join(cur, 'checkpoints');
+    if (fs.existsSync(legacyCk) && !fs.existsSync(curCk))
+      fs.cpSync(legacyCk, curCk, { recursive: true });
+  } catch {}
+}
+migrateLegacyUserData();
 
 // Scrollbar igual ao Chrome atual. Sem isto, o Chromium do Electron renderiza o
 // scrollbar "clássico" (cinza grosso, estilo antigo) e o overlay/fluent fino que o
@@ -71,12 +94,12 @@ app.commandLine.appendSwitch(
   'OverlayScrollbar,FluentOverlayScrollbar,FluentScrollbar',
 );
 
-// Remove os tokens próprios do User-Agent ("Carcará Code/x" e "Electron/x") pra o
-// WebView se apresentar como Chrome puro. O nome com acento gerava um byte inválido
-// no header e gateways (Supabase/Cloudflare) rejeitavam com 500. A versão do Chrome
-// vem do UA padrão, então acompanha sozinha quando o Electron for atualizado.
+// Remove os tokens próprios do User-Agent ("Loop Code/x" e "Electron/x") pra o
+// WebView se apresentar como Chrome puro (sites/gateways estranham UA custom —
+// no Carcará, o nome com acento chegou a gerar byte inválido no header). A
+// versão do Chrome vem do UA padrão, então acompanha o Electron sozinha.
 app.userAgentFallback = app.userAgentFallback
-  .replace(/Carcar[^/]*\/\S+\s*/i, '')
+  .replace(/Loop ?Code\/\S+\s*/i, '')
   .replace(/Electron\/\S+\s*/i, '')
   .replace(/\s+/g, ' ')
   .trim();
@@ -85,7 +108,7 @@ app.userAgentFallback = app.userAgentFallback
 // registrado como privilegiado ANTES do app ficar pronto. 'stream' habilita o range.
 protocol.registerSchemesAsPrivileged([
   {
-    scheme: 'ygc-media',
+    scheme: 'lc-media',
     privileges: { secure: true, stream: true, supportFetchAPI: true, bypassCSP: true },
   },
 ]);
@@ -116,6 +139,22 @@ function saveConfig(cfg) {
   try {
     fs.writeFileSync(configPath(), JSON.stringify(cfg, null, 2));
   } catch {}
+}
+
+// Pasta de dados por projeto (prompts, requests, servidores MCP). O fork grava
+// em .loopcode/, mas continua LENDO de .carcara/ (legado do Carcará Code) quando
+// o caminho novo ainda não existe. Ver docs/LOOP_CODE_BRANDING_MIGRATION.md.
+const PROJECT_DATA_DIR = '.loopcode';
+const LEGACY_PROJECT_DATA_DIR = '.carcara';
+function projectDataPath(projectPath, ...parts) {
+  return path.join(projectPath, PROJECT_DATA_DIR, ...parts);
+}
+// Caminho pra LER: o novo se existir; senão o legado se existir; senão o novo.
+function projectDataReadPath(projectPath, ...parts) {
+  const cur = projectDataPath(projectPath, ...parts);
+  if (fs.existsSync(cur)) return cur;
+  const legacy = path.join(projectPath, LEGACY_PROJECT_DATA_DIR, ...parts);
+  return fs.existsSync(legacy) ? legacy : cur;
 }
 
 // Perfil de um projeto remoto, guardado em cfg.remotes[hostKey] (não-secreto).
@@ -214,13 +253,22 @@ function cleanup() {
   try {
     connections.endAll();
   } catch {}
+  // Execuções de coding agents (agents:*) — mata processos ativos ao sair.
+  try {
+    agentRuntime.service.disposeAll();
+  } catch {}
+  // Coding Loops: aborta etapas em execução (a recuperação no próximo boot
+  // marca os runs como interrompidos).
+  try {
+    loopRuntime.runner.disposeAll().catch(() => {});
+  } catch {}
 }
 
-// Serve um arquivo de mídia pelo scheme ygc-media://, respeitando o header Range pra
+// Serve um arquivo de mídia pelo scheme lc-media://, respeitando o header Range pra
 // permitir seek sem carregar o arquivo inteiro na memória. Escopo restrito às pastas
-// de projeto abertas (segurança). URL: ygc-media://local/?p=<encodeURIComponent(path)>
+// de projeto abertas (segurança). URL: lc-media://local/?p=<encodeURIComponent(path)>
 function registerMediaProtocol() {
-  protocol.handle('ygc-media', async (request) => {
+  protocol.handle('lc-media', async (request) => {
     let filePath = '';
     try {
       filePath = decodeURIComponent(new URL(request.url).searchParams.get('p') || '');
@@ -1761,13 +1809,13 @@ ipcMain.handle('fs:read', async (evt, { filePath }) => {
       return { error: String(err) };
     }
   }
-  // PDF: servido pelo protocolo de streaming (ygc-media://) pro leitor nativo do Chromium.
+  // PDF: servido pelo protocolo de streaming (lc-media://) pro leitor nativo do Chromium.
   // Antes ia como data: URL, mas o PDFium não renderiza PDF via data: dentro de iframe
   // (tela em branco). Com uma URL de verdade + Content-Type application/pdf ele abre.
   if (ext === '.pdf') {
     try {
       const st = fs.statSync(filePath);
-      const url = 'ygc-media://local/?p=' + encodeURIComponent(filePath);
+      const url = 'lc-media://local/?p=' + encodeURIComponent(filePath);
       return { pdf: url, size: st.size };
     } catch (err) {
       return { error: String(err) };
@@ -1802,12 +1850,12 @@ ipcMain.handle('fs:read', async (evt, { filePath }) => {
       return { error: 'Não foi possível ler o CSV: ' + ((err && err.message) || String(err)) };
     }
   }
-  // Áudio/vídeo web-native: servidos pelo protocolo de streaming (ygc-media://) com Range/seek.
+  // Áudio/vídeo web-native: servidos pelo protocolo de streaming (lc-media://) com Range/seek.
   const mkind = mediaCore.mediaKind(filePath);
   if (mkind) {
     try {
       const st = fs.statSync(filePath);
-      const url = 'ygc-media://local/?p=' + encodeURIComponent(filePath);
+      const url = 'lc-media://local/?p=' + encodeURIComponent(filePath);
       return { [mkind]: url, mime: mediaCore.mimeForMedia(filePath), size: st.size };
     } catch (err) {
       return { error: String(err) };
@@ -2296,6 +2344,200 @@ ipcMain.handle('chat:close', (evt, { sessionId }) => {
 ipcMain.handle('claude:applyTheme', (evt, { theme }) => {
   applyClaudeTheme(theme);
   return { ok: true };
+});
+
+// ---------- Coding Agents (contrato genérico — ver electron/agents/) ----------
+// Caminho programático de execução (1 prompt → 1 processo → 1 resultado), usado
+// pelo futuro motor de Coding Loops. NÃO substitui o chat (chat:*) nem o
+// terminal (term:*): é aditivo. O adapter do Claude Code reusa a mesma lógica
+// headless do chat (chat-cli.cjs) e o mesmo cleanEnv/killProc daqui.
+const { createAgentRuntime } = require('./electron/agents/index.cjs');
+const agentRuntime = createAgentRuntime({ claude: { kill: killProc, env: cleanEnv } });
+
+// Só executa em workspace autorizado: pasta local que está na lista de projetos
+// do rail (ou dentro de uma). Nada de caminho arbitrário vindo do renderer.
+function isAuthorizedWorkspace(p) {
+  if (typeof p !== 'string' || !p.trim() || isRemote(p)) return false;
+  let real;
+  try {
+    real = fs.realpathSync(path.resolve(p));
+  } catch {
+    return false; // não existe
+  }
+  const projects = (loadConfig().projects || []).filter((proj) => !isRemote(proj));
+  return projects.some((proj) => {
+    try {
+      const rp = fs.realpathSync(path.resolve(proj));
+      return real === rp || real.startsWith(rp + path.sep);
+    } catch {
+      return false;
+    }
+  });
+}
+
+ipcMain.handle('agents:list', async () => {
+  try {
+    const agents = await agentRuntime.service.listAgents();
+    return { ok: true, defaultAgentId: agentRuntime.service.defaultAgentId, agents };
+  } catch (err) {
+    return { error: String((err && err.message) || err) };
+  }
+});
+
+ipcMain.handle('agents:execute', async (evt, { agentId, input } = {}) => {
+  try {
+    if (typeof agentId !== 'string' || !agentId) return { error: 'agentId inválido.' };
+    if (!input || typeof input !== 'object') return { error: 'input inválido.' };
+    if (!isAuthorizedWorkspace(input.workspacePath)) return { error: tn('agent_workspace_denied') };
+    const result = await agentRuntime.service.execute(agentId, input, (event) =>
+      safeSend('agent:event', { agentId, event }),
+    );
+    return { ok: true, result };
+  } catch (err) {
+    return { error: String((err && err.message) || err) };
+  }
+});
+
+ipcMain.handle('agents:cancel', async (evt, { agentId, executionId } = {}) => {
+  try {
+    if (typeof agentId !== 'string' || typeof executionId !== 'string')
+      return { error: 'parâmetros inválidos.' };
+    await agentRuntime.service.cancel(agentId, executionId);
+    return { ok: true };
+  } catch (err) {
+    return { error: String((err && err.message) || err) };
+  }
+});
+
+// ---------- Coding Loops (motor de workflows — ver electron/loop/) ----------
+// O LoopRunner (main) controla estado, transições, limites, checkpoints e
+// persistência; o renderer só pede ações e exibe eventos (push 'loop:event').
+const { createLoopRuntime } = require('./electron/loop/index.cjs');
+const loopRuntime = createLoopRuntime({
+  agentRuntime,
+  dir: path.join(app.getPath('userData'), 'loops'),
+  emit: (event) => safeSend('loop:event', event),
+  kill: killProc,
+  env: cleanEnv,
+});
+// Recuperação no boot: execuções que estavam 'running' quando o app fechou
+// viram "interrompidas" (nada é retomado sozinho — o usuário decide retomar).
+loopRuntime.runner.recoverOnStartup().catch(() => {});
+
+// Erros de domínio têm mensagem curta pensada pra UI; nunca mandamos stack.
+const loopErr = (err) => ({ error: String((err && err.message) || err) });
+
+ipcMain.handle('loop:list-definitions', () => {
+  try {
+    return {
+      ok: true,
+      templates: loopRuntime.templates.listTemplates(),
+      defaultAgentId: agentRuntime.service.defaultAgentId,
+    };
+  } catch (err) {
+    return loopErr(err);
+  }
+});
+
+ipcMain.handle(
+  'loop:start',
+  async (evt, { templateId, workspacePath, objective, options } = {}) => {
+    try {
+      if (typeof templateId !== 'string' || typeof objective !== 'string')
+        return { error: 'Parâmetros inválidos.' };
+      if (!isAuthorizedWorkspace(workspacePath)) return { error: tn('agent_workspace_denied') };
+      const definition = loopRuntime.templates.buildTemplate(
+        templateId,
+        options && typeof options === 'object' ? options : {},
+      );
+      if (!definition) return { error: `Template desconhecido: ${templateId}` };
+      const check = loopRuntime.validateDefinition(definition);
+      if (!check.ok) return { error: check.errors.join(' ') };
+      const run = await loopRuntime.runner.startRun({
+        definition,
+        workspacePath: fs.realpathSync(path.resolve(workspacePath)),
+        objective,
+      });
+      return { ok: true, run };
+    } catch (err) {
+      return loopErr(err);
+    }
+  },
+);
+
+ipcMain.handle('loop:get', async (evt, { runId } = {}) => {
+  try {
+    if (typeof runId !== 'string') return { error: 'runId inválido.' };
+    return { ok: true, run: await loopRuntime.runner.getRun(runId) };
+  } catch (err) {
+    return loopErr(err);
+  }
+});
+
+ipcMain.handle('loop:list-runs', async (evt, { workspacePath } = {}) => {
+  try {
+    let runs = await loopRuntime.runner.listRuns();
+    if (typeof workspacePath === 'string' && workspacePath)
+      runs = runs.filter((r) => r.workspacePath === workspacePath);
+    return { ok: true, runs };
+  } catch (err) {
+    return loopErr(err);
+  }
+});
+
+ipcMain.handle('loop:approve-checkpoint', async (evt, { runId, stepId } = {}) => {
+  try {
+    if (typeof runId !== 'string' || typeof stepId !== 'string')
+      return { error: 'Parâmetros inválidos.' };
+    return { ok: true, run: await loopRuntime.runner.approveCheckpoint(runId, stepId) };
+  } catch (err) {
+    return loopErr(err);
+  }
+});
+
+ipcMain.handle('loop:reject-checkpoint', async (evt, { runId, stepId, reason } = {}) => {
+  try {
+    if (typeof runId !== 'string' || typeof stepId !== 'string')
+      return { error: 'Parâmetros inválidos.' };
+    return {
+      ok: true,
+      run: await loopRuntime.runner.rejectCheckpoint(
+        runId,
+        stepId,
+        typeof reason === 'string' ? reason : undefined,
+      ),
+    };
+  } catch (err) {
+    return loopErr(err);
+  }
+});
+
+ipcMain.handle('loop:cancel', async (evt, { runId } = {}) => {
+  try {
+    if (typeof runId !== 'string') return { error: 'runId inválido.' };
+    return { ok: true, run: await loopRuntime.runner.cancelRun(runId) };
+  } catch (err) {
+    return loopErr(err);
+  }
+});
+
+ipcMain.handle('loop:resume', async (evt, { runId } = {}) => {
+  try {
+    if (typeof runId !== 'string') return { error: 'runId inválido.' };
+    return { ok: true, run: await loopRuntime.runner.resumeRun(runId) };
+  } catch (err) {
+    return loopErr(err);
+  }
+});
+
+ipcMain.handle('loop:retry-step', async (evt, { runId, stepId } = {}) => {
+  try {
+    if (typeof runId !== 'string' || typeof stepId !== 'string')
+      return { error: 'Parâmetros inválidos.' };
+    return { ok: true, run: await loopRuntime.runner.retryStep(runId, stepId) };
+  } catch (err) {
+    return loopErr(err);
+  }
 });
 
 // ---------- Sessões do Claude Code (várias por projeto) ----------
@@ -2850,8 +3092,8 @@ async function ensureShadow(projectPath) {
     fs.mkdirSync(dir, { recursive: true });
     const g = shadowGit(projectPath);
     await g.raw(['init']);
-    await g.raw(['config', 'user.email', 'checkpoints@carcara.code']);
-    await g.raw(['config', 'user.name', 'Carcará Checkpoints']);
+    await g.raw(['config', 'user.email', 'checkpoints@loopcode.local']);
+    await g.raw(['config', 'user.name', 'Loop Code Checkpoints']);
     await g.raw(['config', 'commit.gpgsign', 'false']);
     fs.mkdirSync(path.join(dir, 'info'), { recursive: true });
     fs.writeFileSync(path.join(dir, 'info', 'exclude'), CHECKPOINT_EXCLUDE);
@@ -2967,11 +3209,12 @@ ipcMain.handle('checkpoint:setEnabled', (evt, { enabled }) => {
   return { ok: true };
 });
 
-// ---------- Biblioteca de prompts (por projeto, em .carcara/prompts.json) ----------
+// ---------- Biblioteca de prompts (por projeto, em .loopcode/prompts.json) ----------
 // Prompts reutilizáveis que o usuário injeta no input do chat. Ficam versionáveis
-// junto do projeto (.carcara/), então acompanham o repo e a equipe.
+// junto do projeto (.loopcode/), então acompanham o repo e a equipe. Leitura cai
+// pro legado .carcara/ quando o arquivo novo ainda não existe.
 function promptsFile(projectPath) {
-  return path.join(projectPath, '.carcara', 'prompts.json');
+  return projectDataReadPath(projectPath, 'prompts.json');
 }
 ipcMain.handle('prompts:list', (evt, { projectPath }) => {
   try {
@@ -2985,8 +3228,11 @@ ipcMain.handle('prompts:list', (evt, { projectPath }) => {
 });
 ipcMain.handle('prompts:save', (evt, { projectPath, items }) => {
   try {
-    fs.mkdirSync(path.join(projectPath, '.carcara'), { recursive: true });
-    fs.writeFileSync(promptsFile(projectPath), JSON.stringify(items || [], null, 2));
+    fs.mkdirSync(projectDataPath(projectPath), { recursive: true });
+    fs.writeFileSync(
+      projectDataPath(projectPath, 'prompts.json'),
+      JSON.stringify(items || [], null, 2),
+    );
     return { ok: true };
   } catch (e) {
     return { ok: false, error: (e && e.message) || String(e) };
@@ -3139,7 +3385,7 @@ ipcMain.handle('http:send', async (evt, { request, workingDir }) => {
     const httpyac = ensureHttpyac();
     const text = typeof request === 'string' ? request : buildHttpText(request || {});
     const fileStore = new httpyac.store.HttpFileStore();
-    const httpFile = await fileStore.parse('carcara-request.http', text, {
+    const httpFile = await fileStore.parse('loopcode-request.http', text, {
       workingDir: workingDir || process.cwd(),
     });
     const region = httpFile.httpRegions.find((r) => r.request);
@@ -3221,8 +3467,12 @@ ipcMain.handle('http:toSnippet', async (evt, { request, target, client }) => {
 });
 
 // Persistência das requests como arquivos .http no projeto (git-friendly, compatível com VS Code REST Client).
-function requestsDir(projectPath) {
-  return path.join(projectPath, '.carcara', 'requests');
+// Escrita em .loopcode/requests; leitura por arquivo cai pro legado .carcara/requests.
+function requestsWriteDir(projectPath) {
+  return projectDataPath(projectPath, 'requests');
+}
+function requestFile(projectPath, name) {
+  return projectDataReadPath(projectPath, 'requests', name);
 }
 function safeName(name) {
   return (
@@ -3234,12 +3484,19 @@ function safeName(name) {
 
 ipcMain.handle('http:listSaved', (evt, { projectPath }) => {
   try {
-    const dir = requestsDir(projectPath);
-    if (!fs.existsSync(dir)) return { ok: true, items: [] };
-    const items = fs
-      .readdirSync(dir)
-      .filter((f) => f.toLowerCase().endsWith('.http'))
-      .map((f) => ({ name: f.replace(/\.http$/i, '') }))
+    // Junta o dir novo e o legado (o novo vence em caso de nome repetido),
+    // pra requests salvas antes do rename não sumirem da lista.
+    const names = new Set();
+    for (const dir of [
+      path.join(projectPath, LEGACY_PROJECT_DATA_DIR, 'requests'),
+      requestsWriteDir(projectPath),
+    ]) {
+      if (!fs.existsSync(dir)) continue;
+      for (const f of fs.readdirSync(dir))
+        if (f.toLowerCase().endsWith('.http')) names.add(f.replace(/\.http$/i, ''));
+    }
+    const items = Array.from(names)
+      .map((name) => ({ name }))
       .sort((a, b) => a.name.localeCompare(b.name));
     return { ok: true, items };
   } catch (e) {
@@ -3249,10 +3506,7 @@ ipcMain.handle('http:listSaved', (evt, { projectPath }) => {
 
 ipcMain.handle('http:readSaved', (evt, { projectPath, name }) => {
   try {
-    const text = fs.readFileSync(
-      path.join(requestsDir(projectPath), safeName(name) + '.http'),
-      'utf8',
-    );
+    const text = fs.readFileSync(requestFile(projectPath, safeName(name) + '.http'), 'utf8');
     return { ok: true, text };
   } catch (e) {
     return { ok: false, error: (e && e.message) || String(e) };
@@ -3261,7 +3515,7 @@ ipcMain.handle('http:readSaved', (evt, { projectPath, name }) => {
 
 ipcMain.handle('http:saveRequest', (evt, { projectPath, name, request }) => {
   try {
-    const dir = requestsDir(projectPath);
+    const dir = requestsWriteDir(projectPath);
     fs.mkdirSync(dir, { recursive: true });
     const text = typeof request === 'string' ? request : buildHttpText(request || {});
     const safe = safeName(name);
@@ -3274,7 +3528,7 @@ ipcMain.handle('http:saveRequest', (evt, { projectPath, name, request }) => {
 
 ipcMain.handle('http:deleteSaved', (evt, { projectPath, name }) => {
   try {
-    fs.unlinkSync(path.join(requestsDir(projectPath), safeName(name) + '.http'));
+    fs.unlinkSync(requestFile(projectPath, safeName(name) + '.http'));
     return { ok: true };
   } catch (e) {
     return { ok: false, error: (e && e.message) || String(e) };
@@ -3473,16 +3727,20 @@ ipcMain.handle('mcp:getPrompt', async (e, { connId, name, args }) => {
   }
 });
 
-// Persistência dos servidores salvos: <projeto>/.carcara/mcp-servers.json (nome -> config).
-function mcpServersFile(projectPath) {
-  return path.join(projectPath, '.carcara', 'mcp-servers.json');
-}
+// Persistência dos servidores salvos: <projeto>/.loopcode/mcp-servers.json
+// (nome -> config). Leitura cai pro legado .carcara/ enquanto o novo não existe.
 function readMcpServers(projectPath) {
   try {
-    return JSON.parse(fs.readFileSync(mcpServersFile(projectPath), 'utf8'));
+    return JSON.parse(
+      fs.readFileSync(projectDataReadPath(projectPath, 'mcp-servers.json'), 'utf8'),
+    );
   } catch {
     return {};
   }
+}
+function writeMcpServers(projectPath, all) {
+  fs.mkdirSync(projectDataPath(projectPath), { recursive: true });
+  fs.writeFileSync(projectDataPath(projectPath, 'mcp-servers.json'), JSON.stringify(all, null, 2));
 }
 ipcMain.handle('mcp:listServers', (e, { projectPath }) => {
   try {
@@ -3502,8 +3760,7 @@ ipcMain.handle('mcp:saveServer', (e, { projectPath, name, config }) => {
   try {
     const all = readMcpServers(projectPath);
     all[name] = config;
-    fs.mkdirSync(path.join(projectPath, '.carcara'), { recursive: true });
-    fs.writeFileSync(mcpServersFile(projectPath), JSON.stringify(all, null, 2));
+    writeMcpServers(projectPath, all);
     return { ok: true };
   } catch (err) {
     return { ok: false, error: err.message };
@@ -3513,7 +3770,7 @@ ipcMain.handle('mcp:deleteServer', (e, { projectPath, name }) => {
   try {
     const all = readMcpServers(projectPath);
     delete all[name];
-    fs.writeFileSync(mcpServersFile(projectPath), JSON.stringify(all, null, 2));
+    writeMcpServers(projectPath, all);
     return { ok: true };
   } catch (err) {
     return { ok: false, error: err.message };
@@ -3604,13 +3861,13 @@ function needsInstall(p, pkg) {
 // ---- A gente CONTROLA a porta (não adivinha): escolhe uma livre, força no dev server
 // e espera ELA subir. Vínculo em memória, vale enquanto o projeto roda.
 async function pickFreePort() {
-  // Portas que ESTE Carcará já reservou (mesmo processo).
+  // Portas que ESTE Loop Code já reservou (mesmo processo).
   const used = new Set(
     [...runningServers.values()].map((e) => Number(e.chosenPort)).filter(Boolean),
   );
   let base = 8080;
   // O detect-port só faz bind check TCP (0.0.0.0/127.0.0.1) e não enxerga o
-  // runningServers de OUTRO Carcará — e ainda erra quando o dev server escuta só
+  // runningServers de OUTRO Loop Code — e ainda erra quando o dev server escuta só
   // em ::1 (Vite/Astro). Por isso, além do detect-port, a gente faz um probe HTTP
   // real (v4+v6) pra não roubar uma porta que JÁ está servindo de outra instância.
   for (let attempt = 0; attempt < 200; attempt++) {
@@ -3626,7 +3883,7 @@ async function pickFreePort() {
       continue;
     }
     if (await probePort(candidate)) {
-      // Já tem alguém vivo aqui (outro Carcará?). Marca e tenta a próxima.
+      // Já tem alguém vivo aqui (outro Loop Code?). Marca e tenta a próxima.
       used.add(candidate);
       base = candidate + 1;
       continue;

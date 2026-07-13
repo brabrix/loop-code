@@ -21,7 +21,7 @@ function assert(cond, msg) {
   if (!cond) throw new Error('ASSERT: ' + msg);
 }
 function tmp() {
-  return fs.mkdtempSync(path.join(os.tmpdir(), 'carcara-php-'));
+  return fs.mkdtempSync(path.join(os.tmpdir(), 'loopcode-php-'));
 }
 function write(dir, rel, content) {
   const f = path.join(dir, rel);
@@ -98,7 +98,7 @@ async function run() {
 
   // verifySha256
   const hashDir = tmp();
-  const buf = Buffer.from('carcara-php-smoke-fixture');
+  const buf = Buffer.from('loopcode-php-smoke-fixture');
   const f = write(hashDir, 'blob.bin', buf);
   const expected = crypto.createHash('sha256').update(buf).digest('hex');
   assert((await verifySha256(f, expected)) === true, 'sha256 correto -> true');

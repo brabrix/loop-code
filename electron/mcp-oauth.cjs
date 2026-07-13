@@ -79,7 +79,7 @@ function makeProvider(serverUrl, onRedirect) {
         token_endpoint_auth_method: 'none',
         grant_types: ['authorization_code', 'refresh_token'],
         response_types: ['code'],
-        client_name: 'Carcará Code',
+        client_name: 'Loop Code',
         client_uri: 'https://github.com/ygor/ygor-code',
       };
     },
@@ -141,7 +141,7 @@ function startCallbackServer() {
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
     res.end(`<!doctype html><html><body style="font-family:system-ui,sans-serif;background:#171411;color:#f0ece6;display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;margin:0">
       <h2 style="color:${code ? '#e8722c' : '#e25555'}">${code ? 'Autorizado ✓' : 'Falha na autorização'}</h2>
-      <p style="opacity:.7">Pode fechar esta aba e voltar ao Carcará Code.</p></body></html>`);
+      <p style="opacity:.7">Pode fechar esta aba e voltar ao Loop Code.</p></body></html>`);
     if (code) resolveCode(code);
     else rejectCode(new Error(error || 'redirect sem code'));
   });

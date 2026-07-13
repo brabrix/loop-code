@@ -31,7 +31,7 @@ function parse(buf) {
   return { ws, rows: range.e.r + 1, cols: range.e.c + 1 };
 }
 
-const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'carcara-csv-'));
+const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'loopcode-csv-'));
 const cleanup = [];
 function writeTmp(name, buf) {
   const p = path.join(tmp, name);

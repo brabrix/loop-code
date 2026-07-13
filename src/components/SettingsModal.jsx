@@ -87,7 +87,8 @@ function YoutubeIcon(props) {
   );
 }
 
-// Quem fez o Carcará Code. Adicione/remova redes aqui — a tela "Sobre" se monta sozinha.
+// Autor do Carcará Code — o projeto original do qual o Loop Code é fork (MIT).
+// O cartão fica na tela "Sobre" como crédito/atribuição ao projeto original.
 // 'href' pode ser https://… (abre no navegador) ou mailto:… (abre o e-mail).
 // 'sub' é uma CHAVE de tradução (resolvida com t(link.sub) no render).
 const AUTHOR = {
@@ -787,7 +788,7 @@ export function SettingsModal({
                   {t('settings.aboutVersionLabel')}
                 </span>
                 <span className="font-mono text-sm font-semibold text-foreground">
-                  Carcará Code v{appVersion || '—'}
+                  Loop Code v{appVersion || '—'}
                 </span>
               </div>
               {/* Contribuir: link pro repo público (PR) */}
@@ -800,7 +801,7 @@ export function SettingsModal({
                 </p>
                 <button
                   type="button"
-                  onClick={() => openLink('https://github.com/Yg0rAndrade/carcara-code')}
+                  onClick={() => openLink('https://github.com/brabrix/loop-code')}
                   className="mt-3 inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-[13px] font-medium transition-colors hover:bg-muted"
                 >
                   <GithubIcon className="size-4" />

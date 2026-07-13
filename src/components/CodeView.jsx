@@ -1738,7 +1738,7 @@ function PdfViewer({ src, name }) {
 }
 
 // Visualizador de vídeo: player nativo do Chromium (timeline/seek, volume, velocidade,
-// tela cheia, picture-in-picture). A fonte é uma URL ygc-media:// com streaming + Range.
+// tela cheia, picture-in-picture). A fonte é uma URL lc-media:// com streaming + Range.
 function VideoViewer({ src, name }) {
   const [failed, setFailed] = useState(false);
   if (failed) return <MediaFallback name={name} />;

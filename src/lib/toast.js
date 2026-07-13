@@ -1,4 +1,4 @@
-// Toast global do Carcará Code.
+// Toast global do Loop Code.
 // Um pub/sub mínimo em nível de módulo: qualquer componente chama `toast(...)`
 // sem precisar de Context nem prop-drilling. O <Toaster /> (montado uma vez no
 // App) assina e renderiza a pilha. É assim que "avisos do sistema" (git, preview,

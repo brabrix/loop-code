@@ -11,6 +11,8 @@ import { useTheme } from '@/lib/theme.jsx';
 export function TldrawPanel({ active }) {
   const { theme } = useTheme();
   // Quadro por projeto; sem projeto, um quadro global.
+  // O prefixo 'carcara-board:' é LEGADO proposital: é a chave do IndexedDB local
+  // e renomear apagaria os quadros já desenhados pelos usuários do fork.
   const persistenceKey = `carcara-board:${active?.path || 'global'}`;
 
   const onMount = useCallback(

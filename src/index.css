@@ -6,11 +6,12 @@
 @tailwind utilities;
 
 /* ─────────────────────────────────────────────────────────────────────────
-   Identidade Carcará Code
+   Identidade visual do Loop Code (herdada do Carcará Code, o projeto original)
    Ancorada no carcará (ave de rapina do sertão): plumagem escura, o sol e a
    terra ocre da caatinga, e o traço marcante da PELE FACIAL alaranjada/vermelha.
    Daí: canvas "carvão quente" (não o cinza-azulado genérico) + acento "brasa".
    Tudo num só hue quente; o laranja é a única cor saturada — é a assinatura.
+   Paleta própria do Loop Code fica para a etapa de identidade visual (Fase 1+).
    ───────────────────────────────────────────────────────────────────────── */
 @layer base {
   :root {

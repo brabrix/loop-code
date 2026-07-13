@@ -8,17 +8,17 @@
 // Em vez de outerHTML + estilos computados, reconstrói uma tag mínima + um STACK de
 // componentes (`in X (at arquivo:linha:col)`) + a rota atual. O agente lê o source de lá.
 
-export const GRAB_SENTINEL = '__CARCARA_GRAB__';
-export const GRAB_CANCEL = '__CARCARA_GRAB_CANCEL__';
+export const GRAB_SENTINEL = '__LOOPCODE_GRAB__';
+export const GRAB_CANCEL = '__LOOPCODE_GRAB_CANCEL__';
 
 export const INJECT = `(() => {
-  if (window.__carcaraGrab) return;
+  if (window.__loopcodeGrab) return;
   var ACCENT = '#f2792b';
 
   // Vinheta: glow inset nas bordas do viewport, na cor da seleção (igual react-grab,
   // mas brasa em vez de roxo). Sinaliza claramente que o modo "selecionar" está ligado.
   var vig = document.createElement('div');
-  vig.className = '__carcara-grab-vignette';
+  vig.className = '__loopcode-grab-vignette';
   vig.style.cssText = 'position:fixed;inset:0;z-index:2147483645;pointer-events:none;opacity:0;transition:opacity .18s ease;'
     + 'background:radial-gradient(ellipse at center, transparent 55%, '+ACCENT+'1f 100%);'
     + 'box-shadow:inset 0 0 0 2px '+ACCENT+', inset 0 0 28px 0 '+ACCENT+'66;';
@@ -34,10 +34,10 @@ export const INJECT = `(() => {
   } catch (e) {}
 
   var box = document.createElement('div');
-  box.className = '__carcara-grab-box';
+  box.className = '__loopcode-grab-box';
   box.style.cssText = 'position:fixed;z-index:2147483646;pointer-events:none;border:2px solid '+ACCENT+';background:'+ACCENT+'22;border-radius:3px;transition:all .04s ease;display:none;';
   var tag = document.createElement('div');
-  tag.className = '__carcara-grab-tag';
+  tag.className = '__loopcode-grab-tag';
   tag.style.cssText = 'position:fixed;z-index:2147483647;pointer-events:none;font:600 11px ui-monospace,monospace;color:#fff;background:'+ACCENT+';padding:2px 6px;border-radius:4px;white-space:nowrap;display:none;';
   document.documentElement.appendChild(box);
   document.documentElement.appendChild(tag);
@@ -45,7 +45,7 @@ export const INJECT = `(() => {
   document.documentElement.style.cursor = 'crosshair';
 
   var current = null;
-  function isOurs(el){ return el && el.className && typeof el.className==='string' && el.className.indexOf('__carcara-grab')===0; }
+  function isOurs(el){ return el && el.className && typeof el.className==='string' && el.className.indexOf('__loopcode-grab')===0; }
 
   // ---- helpers de texto (sem regex pra não brigar com o template literal) ----
   function squish(s){
@@ -66,7 +66,7 @@ export const INJECT = `(() => {
   // claramente gerada (mantém 'btn', 'hero', 'ml-auto', 'text-sm', 'card-header').
   function isHashy(c){
     if (!c) return true;
-    if (c.indexOf('__carcara')===0) return true;
+    if (c.indexOf('__loopcode')===0) return true;
     var low = c.toLowerCase();
     if (low.indexOf('css-')===0 || low.indexOf('sc-')===0 || low.indexOf('emotion-')===0) return true;
     if (c.length >= 6 && c.indexOf('-') < 0 && digits(c) > 0 && low === c) return true; // atomic tipo x1n2oezh
@@ -141,7 +141,7 @@ export const INJECT = `(() => {
     var attrs = el.attributes, i, a, an;
     for (i = 0; i < attrs.length; i++) {
       a = attrs[i]; an = a.name;
-      if (an === 'class' || an === 'style' || an.indexOf('__carcara')===0) continue;
+      if (an === 'class' || an === 'style' || an.indexOf('__loopcode')===0) continue;
       if (!keepAttr(an)) continue;
       s += a.value ? (' ' + an + '="' + trunc(a.value, 40) + '"') : (' ' + an);
     }
@@ -249,14 +249,14 @@ export const INJECT = `(() => {
     BLOCK.forEach(function(t){ document.removeEventListener(t, block, true); });
     document.documentElement.style.cursor = prevCursor;
     try { box.remove(); tag.remove(); vig.remove(); } catch (e) {}
-    window.__carcaraGrab = null;
+    window.__loopcodeGrab = null;
   }
 
   document.addEventListener('mousemove', move, true);
   document.addEventListener('click', pick, true);
   document.addEventListener('keydown', onKey, true);
   BLOCK.forEach(function(t){ document.addEventListener(t, block, true); });
-  window.__carcaraGrab = { teardown: teardown };
+  window.__loopcodeGrab = { teardown: teardown };
 })();`;
 
-export const CLEANUP = `(() => { if (window.__carcaraGrab && window.__carcaraGrab.teardown) window.__carcaraGrab.teardown(); })();`;
+export const CLEANUP = `(() => { if (window.__loopcodeGrab && window.__loopcodeGrab.teardown) window.__loopcodeGrab.teardown(); })();`;

@@ -34,13 +34,13 @@ async function run() {
     onLog: (t) => process.stderr.write('[server] ' + t),
     onTraffic: (e) => traffic.push(e),
     // Bloco B: expõe um root e responde sampling/elicitation automaticamente no smoke.
-    roots: [{ uri: 'file:///tmp/carcara-smoke', name: 'carcara-smoke' }],
+    roots: [{ uri: 'file:///tmp/loopcode-smoke', name: 'loopcode-smoke' }],
     onServerRequest: ({ kind }) =>
       kind === 'sampling'
         ? {
             role: 'assistant',
             content: { type: 'text', text: 'ok' },
-            model: 'carcara-manual',
+            model: 'loopcode-manual',
             stopReason: 'endTurn',
           }
         : { action: 'accept', content: {} },
@@ -55,7 +55,7 @@ async function run() {
   const prompts = await c.listPrompts().catch(() => ({ prompts: [] }));
   console.log('resources:', resources.resources.length, 'prompts:', prompts.prompts.length);
 
-  const echo = await c.callTool({ name: 'echo', arguments: { message: 'oi carcara' } });
+  const echo = await c.callTool({ name: 'echo', arguments: { message: 'oi loop code' } });
   console.log('callTool echo:', JSON.stringify(echo.content));
 
   // Bloco C: tráfego deve ter capturado saída e entrada, com ao menos um method.
@@ -124,7 +124,7 @@ async function run() {
   const rootsRes = await c.callTool({ name: 'get-roots-list', arguments: {} }).catch(() => null);
   if (rootsRes) {
     assert(
-      JSON.stringify(rootsRes.content).includes('carcara-smoke'),
+      JSON.stringify(rootsRes.content).includes('loopcode-smoke'),
       'esperava nosso root em get-roots-list',
     );
     console.log('roots bridge ok');

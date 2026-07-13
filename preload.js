@@ -102,6 +102,30 @@ contextBridge.exposeInMainWorld('api', {
   getChatMode: () => ipcRenderer.invoke('chatMode:get'),
   setChatMode: (mode) => ipcRenderer.invoke('chatMode:set', { mode }),
 
+  // Coding agents (contrato genérico — electron/agents/). Caminho programático:
+  // 1 prompt → 1 execução → 1 resultado, com eventos pelo push 'agent:event' via
+  // on(...). Usado pelo futuro motor de Coding Loops; não substitui chat/terminal.
+  agentsList: () => ipcRenderer.invoke('agents:list'),
+  agentsExecute: (agentId, input) => ipcRenderer.invoke('agents:execute', { agentId, input }),
+  agentsCancel: (agentId, executionId) =>
+    ipcRenderer.invoke('agents:cancel', { agentId, executionId }),
+
+  // Coding Loops (motor de workflows — electron/loop/). O renderer só pede
+  // ações e exibe estado/eventos (push 'loop:event' via on(...)); quem controla
+  // o workflow é o LoopRunner no main.
+  loopListDefinitions: () => ipcRenderer.invoke('loop:list-definitions'),
+  loopStart: (templateId, workspacePath, objective, options) =>
+    ipcRenderer.invoke('loop:start', { templateId, workspacePath, objective, options }),
+  loopGet: (runId) => ipcRenderer.invoke('loop:get', { runId }),
+  loopListRuns: (workspacePath) => ipcRenderer.invoke('loop:list-runs', { workspacePath }),
+  loopApproveCheckpoint: (runId, stepId) =>
+    ipcRenderer.invoke('loop:approve-checkpoint', { runId, stepId }),
+  loopRejectCheckpoint: (runId, stepId, reason) =>
+    ipcRenderer.invoke('loop:reject-checkpoint', { runId, stepId, reason }),
+  loopCancel: (runId) => ipcRenderer.invoke('loop:cancel', { runId }),
+  loopResume: (runId) => ipcRenderer.invoke('loop:resume', { runId }),
+  loopRetryStep: (runId, stepId) => ipcRenderer.invoke('loop:retry-step', { runId, stepId }),
+
   // Ponte de chat headless (assistant-ui ↔ `claude -p` stream-json). Os eventos chegam
   // pelo push 'chat:event' via on(...). Additivo — não substitui o terminal (term:*).
   chatStart: (sessionId, projectPath, resumeId) =>
@@ -184,7 +208,7 @@ contextBridge.exposeInMainWorld('api', {
   mcpRespondServerRequest: (reqId, result, error) =>
     ipcRenderer.invoke('mcp:respondServerRequest', { reqId, result, error }),
 
-  // Biblioteca de prompts salvos (por projeto, em .carcara/prompts.json)
+  // Biblioteca de prompts salvos (por projeto, em .loopcode/prompts.json)
   promptsList: (projectPath) => ipcRenderer.invoke('prompts:list', { projectPath }),
   promptsSave: (projectPath, items) => ipcRenderer.invoke('prompts:save', { projectPath, items }),
 

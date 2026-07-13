@@ -91,7 +91,7 @@ export function McpServerRequestModal({ request, onRespond }) {
                   close({
                     role: 'assistant',
                     content: { type: 'text', text },
-                    model: 'carcara-manual',
+                    model: 'loopcode-manual',
                     stopReason: 'endTurn',
                   })
                 }
